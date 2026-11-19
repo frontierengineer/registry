@@ -43,9 +43,9 @@ function shipped(): string {
 function written(): string {
   const root = shipped();
   writeFileSync(join(root, 'platform.json'), JSON.stringify({ builds: [{ buildId: 'build-a', publishedAt: '2026-11-01T00:00:00.000Z' }] }));
-  const listed = (id: string, commit: string, contributions: object, flags: string[] = []) => ({ outcome: 'listed', id, repository: `git@github.com:${id.slice('github.com/'.length)}.git`, cloneUrl: `https://${id}`, commit, flags, contributions });
+  const listed = (id: string, commit: string, contributions: object, flags: string[] = []) => ({ outcome: 'listed', id, repository: `git@github.com:${id.slice('github.com/'.length)}.git`, cloneUrl: `https://${id}`, repositoryId: id.length, commit, flags, contributions });
   recordVerdict(root, listed('github.com/acme/notes', FIRST, notes({ host: { methods: [{ id: 'list-notes', title: 'List', description: 'Lists.' }] } })), '2026-11-19T10:00:00.000Z');
-  recordVerdict(root, listed('github.com/acme/notes', SECOND, notes({ dependencies: [{ id: 'github.com/acme/speech', reason: 'dictation' }], host: { methods: [{ id: 'list-notes', title: 'List', description: 'Lists.' }] } }), ['reaches the network']), '2026-11-19T11:00:00.000Z');
+  recordVerdict(root, listed('github.com/acme/notes', SECOND, notes({ dependencies: [{ id: 'github.com/acme/speech', reason: 'dictation' }], host: { methods: [{ id: 'list-notes', title: 'List', description: 'Lists.' }] } }), ['network']), '2026-11-19T11:00:00.000Z');
   recordVerdict(root, listed('github.com/acme/gone', GONE, { id: 'github.com/acme/gone', title: 'Gone', color: '#111111' }), '2026-11-19T09:00:00.000Z');
   recordVerdict(root, { outcome: 'unpublished', id: 'github.com/acme/gone' }, '2026-11-19T12:00:00.000Z');
   recordVerdict(root, { outcome: 'rejected', id: 'github.com/acme/notes', repository: 'git@github.com:acme/notes.git', commit: REFUSED, reason: 'it does not build' }, '2026-11-19T13:00:00.000Z');
@@ -98,7 +98,7 @@ for (const [over, at] of [['file://', async (root: string) => ({ url: `file://${
         const index = await registry.readIndex(context, { filter: 'markdown' });
         assert.equal(index.kind, 'read');
         assert.deepEqual(index.index.map(({ id, repository, title, description, color, latest }: any) => [id, repository, title, description, color, latest.hash, latest.listedAt, latest.flags, latest.platformBuild]),
-          [['github.com/acme/notes', 'https://github.com/acme/notes', 'Notes', 'Markdown notes on every surface.', '#3b82f6', SECOND, '2026-11-19T11:00:00.000Z', ['reaches the network'], 'build-a']]);
+          [['github.com/acme/notes', 'https://github.com/acme/notes', 'Notes', 'Markdown notes on every surface.', '#3b82f6', SECOND, '2026-11-19T11:00:00.000Z', ['network'], 'build-a']]);
         const listing = await registry.readListing(context, { applicationId: 'github.com/acme/notes' });
         assert.equal(listing.kind, 'listed');
         assert.deepEqual(listing.listing.releases.map(({ hash }: any) => hash), [FIRST, SECOND]);

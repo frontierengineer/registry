@@ -28,7 +28,7 @@ export function verdictProblem(verdict) {
   if (idProblem(verdict.id) !== null || gitHubPartsOf(verdict.id) === null) return `the verdict names no Application id it can write: ${verdict.id}`;
   if (verdict.outcome === 'unpublished') return null;
   if (!isCommitHash(verdict.commit)) return `the verdict names no commit hash: ${verdict.commit}`;
-  if (typeof verdict.repository !== 'string' || typeof verdict.cloneUrl !== 'string' || !Array.isArray(verdict.flags) || typeof verdict.contributions !== 'object') return 'the verdict is not a listing';
+  if (typeof verdict.repository !== 'string' || typeof verdict.cloneUrl !== 'string' || !Number.isInteger(verdict.repositoryId) || !Array.isArray(verdict.flags) || typeof verdict.contributions !== 'object') return 'the verdict is not a listing';
   return null;
 }
 
@@ -51,7 +51,7 @@ export function recordVerdict(root, verdict, at) {
     writeJson(root, path, { ...file, unpublished: true });
     written.push(path);
   } else if (verdict.outcome === 'listed') {
-    const file = readJson(root, path) ?? { id: verdict.id, repository: verdict.cloneUrl, unpublished: false, releases: [] };
+    const file = readJson(root, path) ?? { id: verdict.id, repository: verdict.cloneUrl, repositoryId: verdict.repositoryId, unpublished: false, releases: [] };
     const releases = file.releases ?? [];
     const relisted = releases.length > 0 && releases[releases.length - 1].hash === verdict.commit;
     const next = relisted ? releases : [...releases, {
@@ -61,7 +61,7 @@ export function recordVerdict(root, verdict, at) {
       platformBuild: platformBuildAt(root, at),
       contributions: verdict.contributions,
     }];
-    writeJson(root, path, { id: verdict.id, repository: verdict.cloneUrl, unpublished: false, releases: next });
+    writeJson(root, path, { id: verdict.id, repository: verdict.cloneUrl, repositoryId: file.repositoryId ?? verdict.repositoryId, unpublished: false, releases: next });
     written.push(path);
     const checked = recordCheck(root, { repository: verdict.repository, commit: verdict.commit, outcome: 'listed', reason: '' }, at);
     if (checked !== null) written.push(checked);

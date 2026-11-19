@@ -1,30 +1,31 @@
 #!/usr/bin/env node
-// Reads a pull request's change out of a Registry checkout that has fetched
-// its head, as data: which files it changes against where it branched from
-// the base, and the listing file's content at its head. Nothing of the pull
-// request is checked out or run.
+// Reads a pull request's change through GitHub's API, as data, and asks
+// GitHub what the check will need to know about the listed repository and the
+// pull request's author. The job that runs this holds the token; the job that
+// checks holds none and replays these answers.
 //
-//   node bin/pull-request.mjs --repository <Registry checkout> --base <base ref> --head <head commit>
-//                             --changes <changes file to write> --listing <listing file to write>
-import { spawnSync } from 'node:child_process';
+//   node bin/pull-request.mjs --repository <owner/name of the Registry> --number <n> --head <head commit>
+//                             --author <login> --out <directory to write changes.json, listing.json, answers.json>
+//
+// GITHUB_TOKEN reads public data at a higher rate limit; GITHUB_API_URL
+// points it elsewhere.
 import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { listingChangeOf } from '../lib/check.mjs';
+import { askGitHub } from '../lib/check.mjs';
+import { liveGitHub, recordingGitHub } from '../lib/github.mjs';
+import { readPullRequest } from '../lib/pull-request.mjs';
 
-const { values } = parseArgs({ options: { repository: { type: 'string' }, base: { type: 'string' }, head: { type: 'string' }, changes: { type: 'string' }, listing: { type: 'string' } } });
-for (const name of ['repository', 'base', 'head', 'changes', 'listing']) {
+const { values } = parseArgs({ options: { repository: { type: 'string' }, number: { type: 'string' }, head: { type: 'string' }, author: { type: 'string' }, out: { type: 'string' } } });
+for (const name of ['repository', 'number', 'head', 'author', 'out']) {
   if (!values[name]) { console.error(`--${name} is needed`); process.exit(2); }
 }
-const git = (args) => {
-  const ran = spawnSync('git', args, { cwd: values.repository, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-  if (ran.status !== 0) { console.error(`git ${args[0]} failed: ${ran.stderr}`); process.exit(1); }
-  return ran.stdout;
-};
-const forkPoint = git(['merge-base', values.base, values.head]).trim();
-const fields = git(['diff', '--name-status', '--no-renames', '-z', forkPoint, values.head]).split('\0').filter((field) => field !== '');
-const changes = [];
-for (let index = 0; index + 1 < fields.length; index += 2) changes.push({ status: fields[index].slice(0, 1), path: fields[index + 1] });
-writeFileSync(values.changes, `${JSON.stringify(changes, null, 2)}\n`);
-const change = listingChangeOf(changes);
-writeFileSync(values.listing, change.kind === 'list' ? git(['show', `${values.head}:${change.path}`]) : '');
-console.log(change.problem ?? `${change.kind} ${change.id}`);
+const token = process.env.GITHUB_TOKEN ?? '';
+const api = process.env.GITHUB_API_URL ?? 'https://api.github.com';
+const { changes, listingText } = await readPullRequest({ repository: values.repository, number: values.number, head: values.head, token, api });
+const github = recordingGitHub(liveGitHub(token, api));
+await askGitHub({ changes, listingText, author: values.author, github });
+writeFileSync(join(values.out, 'changes.json'), `${JSON.stringify(changes, null, 2)}\n`);
+writeFileSync(join(values.out, 'listing.json'), listingText ?? '');
+writeFileSync(join(values.out, 'answers.json'), `${JSON.stringify(github.answers, null, 2)}\n`);
+console.log(changes.map(({ status, path }) => `${status} ${path}`).join('\n'));

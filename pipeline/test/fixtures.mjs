@@ -62,10 +62,51 @@ export function fakeGitHub({ repositories: known = {}, members = {} } = {}) {
     repository: async (owner, name) => {
       const found = known[`${owner}/${name}`.toLowerCase()];
       if (found === undefined) return { kind: 'missing' };
-      return { kind: 'found', fullName: found.fullName ?? `${owner}/${name}`, ownerLogin: found.owner ?? owner, ownerType: found.type ?? 'User', isPrivate: found.private === true, isArchived: false };
+      return { kind: 'found', repositoryId: found.repositoryId ?? 1000, fullName: found.fullName ?? `${owner}/${name}`, ownerLogin: found.owner ?? owner, ownerType: found.type ?? 'User', isPrivate: found.private === true, isArchived: false };
     },
     publicMember: async (organization, login) => ((members[organization.toLowerCase()] ?? []).includes(login.toLowerCase()) ? { kind: 'member' } : { kind: 'not_member' }),
   };
 }
 
 export const contributionsText = (id, more = {}) => `// Notes, as a person writes it\n${JSON.stringify({ id, title: 'Notes', color: '#3b82f6', description: 'Markdown notes on every surface.', ...more }, null, 2).replace(/\n}$/, ',\n}')}\n`;
+
+/** GitHub's REST API as the pipeline reads it, answered from a bare
+ *  repository standing for the Registry, where each pull request is
+ *  `refs/pull/<n>/head`, and from a table of repositories and members.
+ *  Answers { url, close }. */
+export async function fakeGitHubApi({ registry, origin, repositories: known = {}, members = {} }) {
+  const { createServer } = await import('node:http');
+  const WORDS = { A: 'added', D: 'removed', M: 'modified', R: 'renamed', C: 'copied', T: 'changed' };
+  const at = (args) => spawnSync('git', args, { cwd: origin, encoding: 'utf8' });
+  const server = createServer((request, response) => {
+    const url = new URL(request.url, 'http://x');
+    const send = (status, body) => { response.writeHead(status, { 'content-type': 'application/json' }); response.end(body === undefined ? '' : typeof body === 'string' ? body : JSON.stringify(body)); };
+    const pull = new RegExp(`^/repos/${registry}/pulls/(\\d+)(/files)?$`).exec(url.pathname);
+    const contents = new RegExp(`^/repos/${registry}/contents/(.+)$`).exec(url.pathname);
+    const repository = /^\/repos\/([^/]+)\/([^/]+)$/.exec(url.pathname);
+    const member = /^\/orgs\/([^/]+)\/public_members\/([^/]+)$/.exec(url.pathname);
+    if (pull) {
+      const head = at(['rev-parse', `refs/pull/${pull[1]}/head`]).stdout.trim();
+      if (!pull[2]) return send(200, { number: Number(pull[1]), head: { sha: head } });
+      if (url.searchParams.get('page') !== '1') return send(200, []);
+      const base = at(['merge-base', 'main', head]).stdout.trim();
+      const fields = at(['diff', '--name-status', '--no-renames', '-z', base, head]).stdout.split('\0').filter((field) => field !== '');
+      const files = [];
+      for (let index = 0; index + 1 < fields.length; index += 2) files.push({ status: WORDS[fields[index][0]], filename: fields[index + 1] });
+      return send(200, files);
+    }
+    if (contents) {
+      const shown = at(['show', `${url.searchParams.get('ref')}:${decodeURIComponent(contents[1])}`]);
+      return shown.status === 0 ? send(200, shown.stdout) : send(404, { message: 'Not Found' });
+    }
+    if (member) return send((members[member[1].toLowerCase()] ?? []).includes(member[2].toLowerCase()) ? 204 : 404);
+    if (repository) {
+      const found = known[`${repository[1]}/${repository[2]}`.toLowerCase()];
+      if (found === undefined) return send(404, { message: 'Not Found' });
+      return send(200, { id: found.repositoryId ?? 1000, full_name: `${repository[1]}/${repository[2]}`, private: found.private === true, archived: false, owner: { login: found.owner ?? repository[1], type: found.type ?? 'User' } });
+    }
+    return send(404, { message: 'Not Found' });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  return { url: `http://127.0.0.1:${server.address().port}`, close: () => new Promise((resolve) => server.close(resolve)) };
+}

@@ -50,6 +50,20 @@ function fieldBreaks(where, before, after) {
   return broken;
 }
 
+/** What a later output field list breaks of an earlier one: a caller reads
+ *  every field, so one removed, retyped or no longer always there breaks it. */
+function outputBreaks(where, before, after) {
+  const broken = [];
+  const now = byKey(after);
+  for (const [key, field] of byKey(before)) {
+    const kept = now.get(key);
+    if (kept === undefined) { broken.push(`${where} no longer answers the field "${key}"`); continue; }
+    if (kept.type !== field.type) broken.push(`${where} changes the answered field "${key}" from ${field.type} to ${kept.type}`);
+    if (field.required === true && kept.required !== true) broken.push(`${where} no longer always answers the field "${key}"`);
+  }
+  return broken;
+}
+
 /** Every way `after` breaks a caller of `before`, in words; empty when it
  *  only adds. */
 export function breakingChanges(before, after) {
@@ -67,6 +81,12 @@ export function breakingChanges(before, after) {
       const kept = now.get(id);
       if (kept === undefined) { broken.push(`it removes the ${word} "${id}"`); continue; }
       if (name === 'actions') broken.push(...fieldBreaks(`the action "${id}"`, entry.input, kept.input));
+      if (name === 'methods' || name === 'workloads') {
+        // The Application Interface declares no types for either today; a
+        // Contributions File that declares fields for them is held to them.
+        broken.push(...fieldBreaks(`the ${word} "${id}"`, entry.input, kept.input));
+        broken.push(...outputBreaks(`the ${word} "${id}"`, entry.output, kept.output));
+      }
       if (name === 'badges' && entry.actionId !== kept.actionId) broken.push(`the badge "${id}" runs "${kept.actionId}" in place of "${entry.actionId}"`);
     }
   }

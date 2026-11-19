@@ -2,7 +2,8 @@
 // (containers/host/modules/registry/interface.ts):
 //
 //   index.json                 { applications: [{ id, repository, title, description, color, latest: Release }] }
-//   applications/<id>.json     { id, repository, unpublished, releases: Release[] }   oldest first, never emptied
+//   applications/<id>.json     { id, repository, repositoryId, unpublished, releases: Release[] }   oldest first, never emptied;
+//                              repositoryId is GitHub's numeric id, which the Host does not read
 //   blocklist.json             { applications: [{ id, reason }], releases: [{ id, hash, reason }], publishers: [{ publisher, reason }] }
 //   checks/<commit hash>.json  { repository, commitHash, outcome: listed|rejected|pending, reason, checkedAt }
 //   platform.json              { builds: [{ buildId, publishedAt }] }

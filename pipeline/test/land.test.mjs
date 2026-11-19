@@ -5,12 +5,30 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { checkListing } from '../lib/check.mjs';
-import { contributionsText, fakeGitHub, git, REGISTRY_ROOT, repositories } from './fixtures.mjs';
+import { replayedGitHub } from '../lib/github.mjs';
+import { contributionsText, fakeGitHubApi, git, REGISTRY_ROOT, repositories } from './fixtures.mjs';
 
 const PIPELINE = join(dirname(fileURLToPath(import.meta.url)), '..');
 const NOTES = 'github.com/acme/notes';
 const read = (root, path) => JSON.parse(readFileSync(join(root, path), 'utf8'));
+const run = promisify(execFile);
+
+/** What the workflow's read job does: the pull request through GitHub's API,
+ *  and GitHub's answers about the listed repository, written to a directory. */
+async function readThroughApi(api, number, head, author, out) {
+  const { stdout } = await run('node', [join(PIPELINE, 'bin', 'pull-request.mjs'), '--repository', 'frontierengineer/registry', '--number', String(number), '--head', head, '--author', author, '--out', out],
+    { env: { ...process.env, GITHUB_API_URL: api.url, GITHUB_TOKEN: '' } });
+  return stdout.trim();
+}
+
+/** What the workflow's check job does with them, holding no token. */
+const checkFromRead = (root, out, author, repos) => checkListing({
+  root, changes: read(out, 'changes.json'), listingText: readFileSync(join(out, 'listing.json'), 'utf8'), author,
+  github: replayedGitHub(read(out, 'answers.json')), cloneUrlFor: repos.cloneUrlFor,
+});
 
 function node(script, args, cwd) {
   const ran = spawnSync('node', [join(PIPELINE, 'bin', script), ...args], { cwd, encoding: 'utf8' });
@@ -61,7 +79,7 @@ function registryRemote() {
 test('dry run of the workflow: the change is read as data, checked, and lands on main in one merge GitHub counts as the pull request merged', async () => {
   const remote = registryRemote();
   const repos = repositories();
-  const github = fakeGitHub({ repositories: { 'acme/notes': { owner: 'acme' } } });
+  const api = await fakeGitHubApi({ registry: 'frontierengineer/registry', origin: remote.origin, repositories: { 'acme/notes': { owner: 'acme', repositoryId: 4242 } } });
   const release = repos.commit('acme', 'notes', { 'contributions.json': contributionsText(NOTES), 'surface.ts': 'export const registration = {};\n' });
   const head = remote.pullRequest(7, { [`listings/${NOTES}.json`]: `${JSON.stringify({ id: NOTES, repository: 'https://github.com/acme/notes', commit: release }, null, 2)}\n` });
 
@@ -72,12 +90,16 @@ test('dry run of the workflow: the change is read as data, checked, and lands on
   git(['commit', '-q', '-m', 'meanwhile'], other);
   git(['push', '-q', 'origin', 'HEAD:main'], other);
 
-  const checker = remote.runner(7);
   const scratch = mkdtempSync(join(remote.base, 'temp-'));
-  assert.equal(node('pull-request.mjs', ['--repository', '.', '--base', 'HEAD', '--head', head, '--changes', join(scratch, 'changes.json'), '--listing', join(scratch, 'listing.json')], checker), `list ${NOTES}`);
+  assert.equal(await readThroughApi(api, 7, head, 'acme', scratch), `A listings/${NOTES}.json`);
+  await api.close();
   assert.deepEqual(read(scratch, 'changes.json'), [{ status: 'A', path: `listings/${NOTES}.json` }]);
-  const verdict = await checkListing({ root: checker, changes: read(scratch, 'changes.json'), listingText: readFileSync(join(scratch, 'listing.json'), 'utf8'), author: 'acme', github, cloneUrlFor: repos.cloneUrlFor });
+  assert.equal(read(scratch, 'answers.json').repositories['acme/notes'].repositoryId, 4242);
+  const checker = mkdtempSync(join(remote.base, 'checker-'));
+  git(['clone', '-q', remote.origin, checker], remote.base);
+  const verdict = await checkFromRead(checker, scratch, 'acme', repos);
   assert.equal(verdict.outcome, 'listed', verdict.reason);
+  assert.equal(verdict.repositoryId, 4242);
   writeFileSync(join(scratch, 'verdict.json'), JSON.stringify(verdict));
 
   const lander = remote.runner(7);
@@ -92,6 +114,7 @@ test('dry run of the workflow: the change is read as data, checked, and lands on
   assert.equal(spawnSync('git', ['merge-base', '--is-ancestor', 'HEAD~1', 'HEAD'], { cwd: published }).status, 0);
   assert.deepEqual(git(['diff', '--name-only', 'HEAD^1', 'HEAD'], published).split('\n').sort(), ['applications/github.com/acme/notes.json', `checks/${release}.json`, 'index.json', 'listings/github.com/acme/notes.json'].sort());
   assert.equal(read(published, 'index.json').applications[0].latest.hash, release);
+  assert.equal(read(published, `applications/${NOTES}.json`).repositoryId, 4242);
   assert.equal(readFileSync(join(published, 'checks', 'unrelated.txt'), 'utf8'), 'x');
 
   const said = node('say.mjs', ['--verdict', join(scratch, 'verdict.json'), '--commit', tip], published);
@@ -101,13 +124,14 @@ test('dry run of the workflow: the change is read as data, checked, and lands on
 test('dry run of the workflow: a refused listing records only its check, and a pull request touching the blocklist is refused', async () => {
   const remote = registryRemote();
   const repos = repositories();
-  const github = fakeGitHub({ repositories: { 'acme/notes': { owner: 'acme' } } });
+  const api = await fakeGitHubApi({ registry: 'frontierengineer/registry', origin: remote.origin, repositories: { 'acme/notes': { owner: 'acme' } } });
   const release = repos.commit('acme', 'notes', { 'contributions.json': contributionsText('github.com/acme/elsewhere') });
   const head = remote.pullRequest(8, { [`listings/${NOTES}.json`]: JSON.stringify({ id: NOTES, repository: 'https://github.com/acme/notes', commit: release }) });
-  const checker = remote.runner(8);
   const scratch = mkdtempSync(join(remote.base, 'temp-'));
-  node('pull-request.mjs', ['--repository', '.', '--base', 'HEAD', '--head', head, '--changes', join(scratch, 'changes.json'), '--listing', join(scratch, 'listing.json')], checker);
-  const verdict = await checkListing({ root: checker, changes: read(scratch, 'changes.json'), listingText: readFileSync(join(scratch, 'listing.json'), 'utf8'), author: 'acme', github, cloneUrlFor: repos.cloneUrlFor });
+  await readThroughApi(api, 8, head, 'acme', scratch);
+  const checker = mkdtempSync(join(remote.base, 'checker-'));
+  git(['clone', '-q', remote.origin, checker], remote.base);
+  const verdict = await checkFromRead(checker, scratch, 'acme', repos);
   assert.equal(verdict.outcome, 'rejected');
   writeFileSync(join(scratch, 'verdict.json'), JSON.stringify(verdict));
   const lander = remote.runner(8);
@@ -121,6 +145,10 @@ test('dry run of the workflow: a refused listing records only its check, and a p
   assert.match(verdict.reason, /declares the id github.com\/acme\/elsewhere/);
 
   const sneaky = remote.pullRequest(9, { 'blocklist.json': '{"applications":[],"releases":[],"publishers":[]}\n', [`listings/${NOTES}.json`]: '{}' });
-  const again = remote.runner(9);
-  assert.match(node('pull-request.mjs', ['--repository', '.', '--base', 'HEAD', '--head', sneaky, '--changes', join(scratch, 'changes.json'), '--listing', join(scratch, 'listing.json')], again), /changes 2: blocklist.json, listings/);
+  await readThroughApi(api, 9, sneaky, 'acme', scratch);
+  await assert.rejects(readThroughApi(api, 9, 'f'.repeat(40), 'acme', scratch), /the run for its newer head checks it/);
+  await api.close();
+  const sneakyVerdict = await checkFromRead(checker, scratch, 'acme', repos);
+  assert.equal(sneakyVerdict.outcome, 'rejected');
+  assert.match(sneakyVerdict.reason, /changes 2: blocklist.json, listings/);
 });

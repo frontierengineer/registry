@@ -62,6 +62,10 @@ test('a later Release only adds to what was published', () => {
   assert.deepEqual(breakingChanges(before, { ...before, surface: { actions: [{ id: 'a', input: [{ key: 'k', type: 'number' }] }] } }), ['the action "a" changes the field "k" from text to number']);
   assert.deepEqual(breakingChanges(before, { ...before, surface: { actions: [{ id: 'a', input: [{ key: 'k', type: 'text', required: true }, { key: 'r', type: 'text', required: true }] }] } }),
     ['the action "a" makes the field "k" required', 'the action "a" adds the required field "r"']);
+  const typed = { host: { methods: [{ id: 'm', input: [{ key: 'q', type: 'text' }], output: [{ key: 'n', type: 'number', required: true }] }] } };
+  assert.deepEqual(breakingChanges(typed, { host: { methods: [{ id: 'm', input: [{ key: 'q', type: 'text' }], output: [{ key: 'n', type: 'number', required: true }, { key: 'more', type: 'text' }] }] } }), []);
+  assert.deepEqual(breakingChanges(typed, { host: { methods: [{ id: 'm', input: [{ key: 'q', type: 'number' }], output: [{ key: 'n', type: 'number' }] }] } }),
+    ['the method "m" changes the field "q" from text to number', 'the method "m" no longer always answers the field "n"']);
 });
 
 test('the scan refuses secrets and packages from outside npm, and flags what the Bundles reach', () => {
@@ -73,28 +77,30 @@ test('the scan refuses secrets and packages from outside npm, and flags what the
   const lock = (resolved) => JSON.stringify({ lockfileVersion: 3, packages: { '': {}, 'node_modules/left-pad': { version: '1.3.0', resolved, integrity: 'sha512-x' } } });
   assert.equal(packagesProblem('{}', lock('https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz')), null);
   assert.match(packagesProblem('{}', lock('git+ssh://git@github.com/x/left-pad.git')), /left-pad is not from the npm registry/);
-  assert.deepEqual(flagsOf(['import { spawn } from "node:child_process"; fetch(url); eval(text);']), ['reaches the network', 'starts processes', 'runs code it builds at run time']);
+  assert.deepEqual(flagsOf(['import { spawn } from "node:child_process"; fetch(url); eval(text);']), ['network', 'processes', 'dynamic code']);
   assert.deepEqual(flagsOf(['export const registration = {};']), []);
 });
 
 test('dry run: a listing pull request is checked, listed, replaced, refused and unpublished, and the files come out as the Host reads them', async () => {
   const root = emptyRegistry();
   const repos = repositories();
-  const github = fakeGitHub({
+  const known = {
     repositories: { 'acme/notes': { owner: 'acme', type: 'Organization' }, 'acrne/notes': { owner: 'acrne' }, 'acme/secret': { owner: 'acme', type: 'Organization', private: true } },
     members: { acme: ['ada'] },
-  });
+  };
+  const github = fakeGitHub(known);
   const check = (changes, text, author = 'ada') => checkListing({ root, changes, listingText: text, author, github, cloneUrlFor: repos.cloneUrlFor });
 
   const first = repos.commit('acme', 'notes', notesFiles());
   const listed = await check(added(NOTES), listingText(NOTES, 'git@github.com:acme/notes.git', first));
   assert.equal(listed.outcome, 'listed', listed.reason);
-  assert.deepEqual(listed.flags, ['reaches the network']);
+  assert.deepEqual(listed.flags, ['network']);
   assert.equal(listed.cloneUrl, 'https://github.com/acme/notes');
   assert.deepEqual(recordVerdict(root, listed, '2026-11-19T10:00:00.000Z'), [`applications/${NOTES}.json`, `checks/${first}.json`, 'index.json']);
   const file = read(root, `applications/${NOTES}.json`);
-  assert.deepEqual(Object.keys(file), ['id', 'repository', 'unpublished', 'releases']);
-  assert.deepEqual(file.releases.map(({ hash, listedAt, flags, platformBuild }) => ({ hash, listedAt, flags, platformBuild })), [{ hash: first, listedAt: '2026-11-19T10:00:00.000Z', flags: ['reaches the network'], platformBuild: '' }]);
+  assert.deepEqual(Object.keys(file), ['id', 'repository', 'repositoryId', 'unpublished', 'releases']);
+  assert.equal(file.repositoryId, 1000);
+  assert.deepEqual(file.releases.map(({ hash, listedAt, flags, platformBuild }) => ({ hash, listedAt, flags, platformBuild })), [{ hash: first, listedAt: '2026-11-19T10:00:00.000Z', flags: ['network'], platformBuild: '' }]);
   assert.equal(file.releases[0].contributions.title, 'Notes');
   assert.deepEqual(read(root, `checks/${first}.json`), { repository: 'git@github.com:acme/notes.git', commitHash: first, outcome: 'listed', reason: '', checkedAt: '2026-11-19T10:00:00.000Z' });
   assert.deepEqual(read(root, 'index.json').applications.map(({ id, repository, title, description, color, latest }) => [id, repository, title, description, color, latest.hash]),
@@ -114,6 +120,12 @@ test('dry run: a listing pull request is checked, listed, replaced, refused and 
   await refused(added('github.com/acme/secret'), listingText('github.com/acme/secret', 'https://github.com/acme/secret', first), /is private/);
   await refused(added('github.com/acrne/notes'), listingText('github.com/acrne/notes', 'https://github.com/acrne/notes', first), /typosquatting distance of github.com\/acme\/notes/, 'acrne');
   await refused(added(NOTES), listingText(NOTES, 'https://github.com/acme/notes', repos.dangling('acme', 'notes')), /not on any branch or tag/);
+
+  known.repositories['acme/notes'].repositoryId = 2000;
+  const takeover = repos.commit('acme', 'notes', notesFiles({ 'README.md': 'new owner\n' }));
+  await refused(replaced(NOTES), listingText(NOTES, 'https://github.com/acme/notes', takeover), /a different GitHub repository from the one the Registry listed under that id \(repository 1000, now 2000\)/);
+  await refused([{ status: 'D', path: `listings/${NOTES}.json` }], null, /a different GitHub repository/);
+  delete known.repositories['acme/notes'].repositoryId;
 
   const renamed = repos.commit('acme', 'notes', { 'contributions.json': contributionsText(NOTES, { host: { methods: [{ id: 'notes', title: 'List', description: 'Lists.' }] } }) });
   await refused(replaced(NOTES), listingText(NOTES, 'https://github.com/acme/notes', renamed), /removes the method "list-notes"/);

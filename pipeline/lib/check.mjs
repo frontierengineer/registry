@@ -4,7 +4,7 @@
 // repository is untrusted code that is cloned, scanned and built, never run.
 //
 // The verdict is one of:
-//   { outcome: 'listed', id, repository, cloneUrl, commit, flags, contributions }
+//   { outcome: 'listed', id, repository, cloneUrl, repositoryId, commit, flags, contributions }
 //   { outcome: 'unpublished', id }
 //   { outcome: 'rejected', id, repository, commit, reason }   (id, repository and commit '' when the listing never named them)
 
@@ -72,7 +72,9 @@ export function listingOf(text, id) {
   return { listing };
 }
 
-async function ownershipProblem(github, id, author) {
+/** Whether the author owns the id's repository, as GitHub answers:
+ *  { owner, repositoryId } | { problem } | { unavailable }. */
+export async function ownershipProblem(github, id, author) {
   const { owner, name } = gitHubPartsOf(id);
   const found = await github.repository(owner, name);
   if (found.kind === 'unavailable') return { unavailable: found.reason };
@@ -80,14 +82,33 @@ async function ownershipProblem(github, id, author) {
   if (found.kind === 'moved') return { problem: `github.com/${owner}/${name} has moved; publish from its new place, which gives the Application its new id` };
   if (found.isPrivate) return { problem: `github.com/${owner}/${name} is private; every install clones a listed Application anonymously` };
   if (found.fullName.toLowerCase() !== `${owner}/${name}`.toLowerCase()) return { problem: `github.com/${owner}/${name} is now ${found.fullName}; publish from there` };
-  if (found.ownerLogin.toLowerCase() === author.toLowerCase()) return { owner: found.ownerLogin };
+  if (found.ownerLogin.toLowerCase() === author.toLowerCase()) return { owner: found.ownerLogin, repositoryId: found.repositoryId };
   if (found.ownerType === 'Organization') {
     const member = await github.publicMember(found.ownerLogin, author);
     if (member.kind === 'unavailable') return { unavailable: member.reason };
-    if (member.kind === 'member') return { owner: found.ownerLogin };
+    if (member.kind === 'member') return { owner: found.ownerLogin, repositoryId: found.repositoryId };
     return { problem: `${author} opened this pull request, and ${found.ownerLogin} owns ${found.fullName}; a listing comes from its repository's owner, so open it as a public member of ${found.ownerLogin} (make your membership public on github.com/orgs/${found.ownerLogin}/people)` };
   }
   return { problem: `${author} opened this pull request, and ${found.ownerLogin} owns ${found.fullName}; a listing comes from its repository's owner` };
+}
+
+/** Why the repository is not the one the Registry listed under this id
+ *  before, or null. GitHub's numeric id stays with a repository through
+ *  renames and transfers and is never reused, so a name taken over after
+ *  its repository was deleted or moved is a different id. */
+function takenOver(existing, owned, id) {
+  if (existing === null || existing.repositoryId === undefined || existing.repositoryId === owned.repositoryId) return null;
+  return `${id} is a different GitHub repository from the one the Registry listed under that id (repository ${existing.repositoryId}, now ${owned.repositoryId}); an id stays with the repository it was first listed from`;
+}
+
+/** Asks GitHub everything the check will need, so the job that asks holds
+ *  the token and the job that checks holds none. */
+export async function askGitHub({ changes, listingText, author, github }) {
+  const change = listingChangeOf(changes);
+  if (change.problem !== undefined) return;
+  if (change.kind === 'unpublish') { await ownershipProblem(github, change.id, author); return; }
+  const read = listingOf(listingText ?? '', change.id);
+  if (read.problem === undefined) await ownershipProblem(github, read.listing.id, author);
 }
 
 /** Clones the repository into a directory of its own and places the commit
@@ -135,6 +156,8 @@ export async function checkListing({ root, changes, listingText, author, github,
     const owned = await ownershipProblem(github, change.id, author);
     if (owned.unavailable !== undefined) return { outcome: 'unavailable', reason: owned.unavailable };
     if (owned.problem !== undefined) return rejected(owned.problem, { id: change.id });
+    const moved = takenOver(existing, owned, change.id);
+    if (moved !== null) return rejected(moved, { id: change.id });
     return { outcome: 'unpublished', id: change.id };
   }
 
@@ -145,6 +168,8 @@ export async function checkListing({ root, changes, listingText, author, github,
   const owned = await ownershipProblem(github, listing.id, author);
   if (owned.unavailable !== undefined) return { outcome: 'unavailable', reason: owned.unavailable };
   if (owned.problem !== undefined) return rejected(owned.problem, listing);
+  const moved = takenOver(existing, owned, listing.id);
+  if (moved !== null) return rejected(moved, listing);
 
   const blocked = blocklistReason(blocklist, listing.id, listing.commit);
   if (blocked !== '') return rejected(`the Registry's blocklist names it: ${blocked}`, listing);
@@ -200,7 +225,7 @@ export async function checkListing({ root, changes, listingText, author, github,
     const built = await buildApplication(source);
     if (built.problem !== undefined) return rejected(built.problem, listing);
 
-    return { outcome: 'listed', id: listing.id, repository: listing.repository, cloneUrl: cloneUrlOf(parts), commit: listing.commit, flags: flagsOf(built.bundles), contributions };
+    return { outcome: 'listed', id: listing.id, repository: listing.repository, cloneUrl: cloneUrlOf(parts), repositoryId: owned.repositoryId, commit: listing.commit, flags: flagsOf(built.bundles), contributions };
   } finally {
     rmSync(place.directory, { recursive: true, force: true });
   }

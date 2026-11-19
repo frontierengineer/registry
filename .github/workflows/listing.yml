@@ -3,11 +3,14 @@
 #
 # pull_request_target runs this file and the checker from the default branch,
 # never the pull request's copy, so a pull request cannot change the checks it
-# is held to. The pull request itself is read as data, and the Application's
-# repository is cloned, scanned and built with install scripts off; nothing of
-# either runs. The job that does that holds a read-only token; only the job
-# that lands the verdict may write, and it runs nothing but the Registry's own
-# code on the verdict.
+# is held to. Three jobs, each holding only what it needs:
+#   read   a read-only token: the pull request through GitHub's API, as data,
+#          and what GitHub says of the listed repository and the author
+#   check  nothing at all: the Application's repository cloned, scanned and
+#          built with install scripts off, none of it run
+#   land   a write token: the verdict landed on the default branch, the pull
+#          request merged or closed, the publisher told; it runs nothing but
+#          the Registry's own code, on the verdict
 name: Listing
 
 on:
@@ -22,20 +25,58 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
+  read:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     permissions:
       contents: read
-    outputs:
-      outcome: ${{ steps.check.outputs.outcome }}
+      pull-requests: read
     steps:
       - name: Check out the Registry at its default branch
         uses: actions/checkout@v4
         with:
           path: registry
-          fetch-depth: 0
           persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Read the pull request through GitHub's API, as data, and ask GitHub about its repository
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_COMMIT: ${{ github.event.pull_request.head.sha }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/pull-request"
+          node registry/pipeline/bin/pull-request.mjs --repository "$REPOSITORY" --number "$NUMBER" --head "$HEAD_COMMIT" \
+            --author "$AUTHOR" --out "$RUNNER_TEMP/pull-request"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pull-request
+          path: ${{ runner.temp }}/pull-request/
+          retention-days: 7
+
+  check:
+    needs: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Clones, scans and builds a stranger's repository: it holds no token and
+    # no credentials, and asks GitHub nothing; the read job asked already.
+    permissions: {}
+    outputs:
+      outcome: ${{ steps.check.outputs.outcome }}
+    steps:
+      - name: Clone the Registry at its default branch, anonymously
+        env:
+          SOURCE: ${{ github.server_url }}/${{ github.repository }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          git clone --quiet "$SOURCE" registry
+          git -C registry -c advice.detachedHead=false checkout --quiet "$COMMIT"
 
       - uses: actions/setup-node@v4
         with:
@@ -45,25 +86,19 @@ jobs:
         working-directory: registry/pipeline
         run: npm ci --ignore-scripts --no-audit --no-fund
 
-      - name: Read the pull request's change, as data
-        working-directory: registry
-        env:
-          NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_COMMIT: ${{ github.event.pull_request.head.sha }}
-        run: |
-          git fetch --quiet --no-tags origin "+refs/pull/${NUMBER}/head:refs/remotes/pull/head"
-          test "$(git rev-parse refs/remotes/pull/head)" = "$HEAD_COMMIT"
-          node pipeline/bin/pull-request.mjs --repository . --base HEAD --head "$HEAD_COMMIT" \
-            --changes "$RUNNER_TEMP/changes.json" --listing "$RUNNER_TEMP/listing.json"
+      - uses: actions/download-artifact@v4
+        with:
+          name: pull-request
+          path: ${{ runner.temp }}/pull-request
 
       - name: Check the listing
         id: check
         env:
           AUTHOR: ${{ github.event.pull_request.user.login }}
-          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          node registry/pipeline/bin/check.mjs --root registry --changes "$RUNNER_TEMP/changes.json" \
-            --listing "$RUNNER_TEMP/listing.json" --author "$AUTHOR" --out "$RUNNER_TEMP/verdict.json"
+          read="$RUNNER_TEMP/pull-request"
+          node registry/pipeline/bin/check.mjs --root registry --changes "$read/changes.json" --listing "$read/listing.json" \
+            --answers "$read/answers.json" --author "$AUTHOR" --out "$RUNNER_TEMP/verdict.json"
           echo "outcome=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).outcome)' "$RUNNER_TEMP/verdict.json")" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4

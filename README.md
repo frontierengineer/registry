@@ -9,7 +9,7 @@ The Registry is files, not a server. Frontier's Host reads them anonymously from
 | File | Written by | What it holds |
 | --- | --- | --- |
 | `listings/<id>.json` | the publisher, by pull request | `{ id, repository, commit }`: the Application and the commit to list. The Host never reads it. |
-| `applications/<id>.json` | the pipeline | `{ id, repository, unpublished, releases }`: every Release the Registry ever listed, oldest first, kept after unpublishing. |
+| `applications/<id>.json` | the pipeline | `{ id, repository, repositoryId, unpublished, releases }`: every Release the Registry ever listed, oldest first, kept after unpublishing. `repositoryId` is GitHub's numeric id for the repository it was first listed from. |
 | `index.json` | the pipeline | `{ applications: [{ id, repository, title, description, color, latest }] }`: every listed Application at its latest Release. Browse reads this. |
 | `checks/<commit hash>.json` | the pipeline | `{ repository, commitHash, outcome, reason, checkedAt }`: what the pipeline concluded of a commit, `listed` or `rejected` with the reason. |
 | `blocklist.json` | a maintainer, by hand | `{ applications: [{ id, reason }], releases: [{ id, hash, reason }], publishers: [{ publisher, reason }] }` |
@@ -21,7 +21,7 @@ An id is its repository's: `github.com/<owner>/<name>`. A Release is
 {
   "hash": "<40-character commit hash>",
   "listedAt": "<when the Registry listed it, ISO-8601 UTC>",
-  "flags": ["<what the scan saw, in the Registry's words>"],
+  "flags": ["<what the scan saw: network, processes, filesystem, dynamic code, obfuscation>"],
   "platformBuild": "<the newest Platform build when it was listed, or empty>",
   "contributions": { "...": "the Application's contributions.json at that commit" }
 }
@@ -51,7 +51,7 @@ The checks run in this order, and the first one that fails refuses the listing a
    - The commit is a full 40-character hash.
    - The id is the repository's id, the way Frontier derives it from any form of the URL.
    - The repository is on GitHub.
-3. **The publisher owns the repository.** The pull request comes from the repository's owner. For an organization's repository, it comes from a public member of that organization. The repository must exist and be public, since every install clones it anonymously.
+3. **The publisher owns the repository.** The pull request comes from the repository's owner. For an organization's repository, it comes from a public member of that organization. The repository must exist and be public, since every install clones it anonymously. It must also be the same GitHub repository the id was first listed from: GitHub's numeric repository id must match. A name taken over after its repository was deleted or moved cannot list under the old id, and cannot unpublish it either.
 4. **The blocklist does not name it.** That covers the Application, the Release, and its publisher.
 5. **The name is not a typosquat.** The id is not within typosquatting distance of an id another owner listed. "Distance" means either of these, compared without case and without `github.com/`:
    - the two ids are equal once characters that look alike (`0`/`o`, `1`/`l`/`i`, `5`/`s`, `rn`/`m`, `vv`/`w`) are folded together and `-`, `_` and `.` are dropped;
@@ -67,7 +67,10 @@ The checks run in this order, and the first one that fails refuses the listing a
    - every action, option source, modal, badge, method and workload by id;
    - every input field of an action, and every option of its runtime or configuration field of its workspace provisioner, by key and type;
    - each singular contribution it had;
-   - the Application it stands in for.
+   - the Application it stands in for;
+   - the input and output fields a method or workload declares, if any. The Application Interface declares none today, so this applies only when a Contributions File does.
+
+   Only the Contributions File is compared. Keeping what a method answers the same is its author's job.
 
    A field a caller could leave out must not become required, and a new field must not be required. A change that would break a caller is a new action or method under a new id, kept beside the old one.
 10. **Its packages are as the Platform installs them.**
@@ -81,13 +84,15 @@ The checks run in this order, and the first one that fails refuses the listing a
 
     The pipeline does not type-check, and it runs none of the Application's code or tests.
 
-**Flags.** The scan reads the built Bundles, which hold the Application's code and every package it uses. It records what it sees on the Release as flags. A flag does not refuse a listing. The install prompt shows each flag, so a person decides with them in view. The flags are:
+**Flags.** The scan reads the built Bundles, which hold the Application's code and every package it uses. It records what it sees on the Release as flags, each a short word from a fixed list that Frontier words for the install prompt. A flag does not refuse a listing. The install prompt shows each flag, so a person decides with them in view. The flags are:
 
-- **reaches the network**
-- **starts processes**
-- **reads or writes files**
-- **runs code it builds at run time**
-- **holds encoded data it may run**
+| Flag | What the Bundles do |
+| --- | --- |
+| `network` | reach the network: `fetch`, WebSocket, Node's `http`, `https`, `net`, `tls`, `dgram`, `dns` |
+| `processes` | start processes or threads: `child_process`, `cluster`, `worker_threads` |
+| `filesystem` | read or write files: Node's `fs` |
+| `dynamic code` | run code built at run time: `eval`, `new Function`, `vm` |
+| `obfuscation` | hold long encoded strings |
 
 A listed Release is never scanned again, even when a new advisory names a package it uses: acting on an advisory is the Application's author's job. A Release found to be malicious is pulled with the blocklist.
 
@@ -110,7 +115,7 @@ Open an issue with the **Report an Application** template. Reports are public. I
 ```sh
 cd pipeline
 npm ci --ignore-scripts
-npm test                                      # the checks, and a dry run of the workflow against local repositories
+npm test                                      # the checks, and a dry run of the workflow against local repositories and a stand-in GitHub API
 bash proof/host-reads.sh ../../frontier       # Frontier's own Registry reader against these files, over file:// and HTTP
 ```
 
@@ -125,9 +130,15 @@ node bin/record.mjs --root .. --verdict /tmp/verdict.json      # writes the file
 
 ## Maintaining the repository
 
-The workflow in `.github/workflows/listing.yml` needs:
+The workflow in `.github/workflows/listing.yml` runs three jobs:
 
-- **Workflow permissions:** "Read and write permissions". The workflow file narrows them per job. The checking job holds a read-only token. Only the landing job writes, and it runs nothing but this repository's own code.
+- **read** holds a read-only token. It reads the pull request through GitHub's API, as data, and asks GitHub about the listed repository and the author.
+- **check** holds no token and no credentials. It clones, scans and builds the Application, and replays what the read job learned.
+- **land** holds a write token. It lands the verdict, and runs nothing but this repository's own code.
+
+The workflow needs:
+
+- **Workflow permissions:** "Read and write permissions". The workflow file narrows them per job.
 - **Fork pull requests:** keep the default, which never gives a fork's workflow secrets. The workflow runs on `pull_request_target`, so it always runs the default branch's copy of itself and of the checker, never the pull request's.
 - **Branch protection on `main`:** if pushes are restricted, allow GitHub Actions to push. The pipeline lands each verdict as one commit on `main`, and its push carrying the pull request's head is what GitHub records as the merge.
 

@@ -1,6 +1,12 @@
 // The scan every Release passes before it is listed. What it refuses stops
 // the listing, with the reason; what it flags is listed anyway and recorded on
-// the Release in these words, which the install prompt shows a person.
+// the Release as one of a fixed list of short words, which the Host words for
+// the install prompt:
+//   network        it reaches the network
+//   processes      it starts processes or threads
+//   filesystem     it reads or writes files
+//   dynamic code   it runs code it builds at run time
+//   obfuscation    it holds long encoded data
 
 export const SIZE_LIMIT_BYTES = 25 * 1024 * 1024;
 const NPM_REGISTRY = 'https://registry.npmjs.org/';
@@ -56,14 +62,14 @@ export function packagesProblem(packageJson, packageLock) {
 // and every package it uses, exactly what runs. A Node built-in stays an
 // import by name in a host or worker Bundle, so it is seen as one.
 const FLAGS = [
-  ['reaches the network', [/\bfetch\s*\(/, /\bXMLHttpRequest\b/, /\bnew\s+WebSocket\b/, /\bEventSource\b/, /["'](?:node:)?(?:http|https|http2|net|tls|dgram|dns)["']/]],
-  ['starts processes', [/["'](?:node:)?(?:child_process|cluster|worker_threads)["']/]],
-  ['reads or writes files', [/["'](?:node:)?fs(?:\/promises)?["']/]],
-  ['runs code it builds at run time', [/\beval\s*\(/, /\bnew\s+Function\s*\(/, /["'](?:node:)?vm["']/]],
-  ['holds encoded data it may run', [/["'`][A-Za-z0-9+/]{400,}={0,2}["'`]/, /\\x[0-9a-f]{2}(?:\\x[0-9a-f]{2}){60,}/i]],
+  ['network', [/\bfetch\s*\(/, /\bXMLHttpRequest\b/, /\bnew\s+WebSocket\b/, /\bEventSource\b/, /["'](?:node:)?(?:http|https|http2|net|tls|dgram|dns)["']/]],
+  ['processes', [/["'](?:node:)?(?:child_process|cluster|worker_threads)["']/]],
+  ['filesystem', [/["'](?:node:)?fs(?:\/promises)?["']/]],
+  ['dynamic code', [/\beval\s*\(/, /\bnew\s+Function\s*\(/, /["'](?:node:)?vm["']/]],
+  ['obfuscation', [/["'`][A-Za-z0-9+/]{400,}={0,2}["'`]/, /\\x[0-9a-f]{2}(?:\\x[0-9a-f]{2}){60,}/i]],
 ];
 
-/** The flags the Bundles raise, in the Registry's words, each once, in a
+/** The flags the Bundles raise, from the fixed list, each once, in a
  *  fixed order. */
 export function flagsOf(bundles) {
   const code = bundles.join('\n');
