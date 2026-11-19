@@ -11,6 +11,7 @@ import { squattedOn } from '../lib/typosquat.mjs';
 import { contributionsText, emptyRegistry, fakeGitHub, repositories } from './fixtures.mjs';
 
 const NOTES = 'github.com/acme/notes';
+const REPORT = 'https://github.com/frontierengineer/registry/issues/new?template=report-an-application.yml';
 const read = (root, path) => JSON.parse(readFileSync(join(root, path), 'utf8'));
 const listingText = (id, repository, commit) => `${JSON.stringify({ id, repository, commit }, null, 2)}\n`;
 const added = (id) => [{ status: 'A', path: `listings/${id}.json` }];
@@ -103,6 +104,7 @@ test('dry run: a listing pull request is checked, listed, replaced, refused and 
   assert.deepEqual(file.releases.map(({ hash, listedAt, flags, platformBuild }) => ({ hash, listedAt, flags, platformBuild })), [{ hash: first, listedAt: '2026-11-19T10:00:00.000Z', flags: ['network'], platformBuild: '' }]);
   assert.equal(file.releases[0].contributions.title, 'Notes');
   assert.deepEqual(read(root, `checks/${first}.json`), { repository: 'git@github.com:acme/notes.git', commitHash: first, outcome: 'listed', reason: '', checkedAt: '2026-11-19T10:00:00.000Z' });
+  assert.equal(read(root, 'index.json').report, REPORT, 'rebuilding the index keeps where an Application is reported');
   assert.deepEqual(read(root, 'index.json').applications.map(({ id, repository, title, description, color, latest }) => [id, repository, title, description, color, latest.hash]),
     [[NOTES, 'https://github.com/acme/notes', 'Notes', 'Markdown notes on every surface.', '#3b82f6', first]]);
 
@@ -153,7 +155,7 @@ test('dry run: a listing pull request is checked, listed, replaced, refused and 
   recordVerdict(root, gone, '2026-11-19T12:00:00.000Z');
   assert.equal(read(root, `applications/${NOTES}.json`).unpublished, true);
   assert.deepEqual(read(root, `applications/${NOTES}.json`).releases.map(({ hash }) => hash), [first, second]);
-  assert.deepEqual(read(root, 'index.json'), { applications: [] });
+  assert.deepEqual(read(root, 'index.json'), { report: REPORT, applications: [] });
 
   const back = await check(added(NOTES), listingText(NOTES, 'https://github.com/acme/notes', second));
   assert.equal(back.outcome, 'listed', back.reason);

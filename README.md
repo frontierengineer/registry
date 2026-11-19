@@ -10,7 +10,7 @@ The Registry is files, not a server. Frontier's Host reads them anonymously from
 | --- | --- | --- |
 | `listings/<id>.json` | the publisher, by pull request | `{ id, repository, commit }`: the Application and the commit to list. The Host never reads it. |
 | `applications/<id>.json` | the pipeline | `{ id, repository, repositoryId, unpublished, releases }`: every Release the Registry ever listed, oldest first, kept after unpublishing. `repositoryId` is GitHub's numeric id for the repository it was first listed from. |
-| `index.json` | the pipeline | `{ applications: [{ id, repository, title, description, color, latest }] }`: every listed Application at its latest Release. Browse reads this. |
+| `index.json` | the pipeline, and `report` by hand | `{ report, applications: [{ id, repository, title, description, color, latest }] }`: every listed Application at its latest Release, which Browse reads, and `report`, the address where an install reports an Application. The pipeline rebuilds `applications` and keeps every other field. |
 | `checks/<commit hash>.json` | the pipeline | `{ repository, commitHash, outcome, reason, checkedAt }`: what the pipeline concluded of a commit, `listed` or `rejected` with the reason. |
 | `blocklist.json` | a maintainer, by hand | `{ applications: [{ id, reason }], releases: [{ id, hash, reason }], publishers: [{ publisher, reason }] }` |
 | `platform.json` | a maintainer, by hand | `{ builds: [{ buildId, publishedAt }] }`: the Platform builds published, so a Release is placed against them. |
@@ -108,7 +108,7 @@ To pull one bad Release, add a `releases` entry for it, and the Application's ow
 
 ## Reporting an Application
 
-Open an issue with the **Report an Application** template. Reports are public. If a report describes a vulnerability others could exploit before a fix, send it privately through the repository's Security tab instead.
+Open an issue with the **Report an Application** template. `index.json` names its address as `report`, so an install reports to the Registry it reads. Add `application=<id>` and `release=<commit hash>` to that address to fill in the report's fields, for example `https://github.com/frontierengineer/registry/issues/new?template=report-an-application.yml&application=github.com/acme/notes&release=<hash>`. Reports are public. If a report describes a vulnerability others could exploit before a fix, send it privately through the repository's Security tab instead.
 
 ## Running the checks yourself
 

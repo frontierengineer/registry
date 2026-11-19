@@ -81,6 +81,7 @@ for (const [over, at] of [['file://', async (root: string) => ({ url: `file://${
     try {
       await readers(place.url, async (registry, context) => {
         assert.deepEqual(await registry.readIndex(context, { filter: '' }), { kind: 'read', index: [] });
+        assert.equal(JSON.parse(readFileSync(join(REGISTRY_ROOT, 'index.json'), 'utf8')).report, 'https://github.com/frontierengineer/registry/issues/new?template=report-an-application.yml');
         assert.deepEqual(await registry.readBlocklist(context, {}), { blocklist: { applications: [], releases: [], publishers: [] }, blocklistRead: true, reason: '', published: true });
         assert.deepEqual(await registry.readPlatformBuilds(context, {}), { kind: 'read', builds: [] });
         assert.deepEqual(await registry.readListing(context, { applicationId: 'github.com/frontierengineer/chat' }), { kind: 'unlisted' });

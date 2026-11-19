@@ -1,7 +1,9 @@
 // The Registry's published files, as Frontier's Host reads them
 // (containers/host/modules/registry/interface.ts):
 //
-//   index.json                 { applications: [{ id, repository, title, description, color, latest: Release }] }
+//   index.json                 { report, applications: [{ id, repository, title, description, color, latest: Release }] }
+//                              report is where an install reports an Application: the issue form,
+//                              prefilled by ?application=<id>&release=<hash>; kept by hand, never rebuilt
 //   applications/<id>.json     { id, repository, repositoryId, unpublished, releases: Release[] }   oldest first, never emptied;
 //                              repositoryId is GitHub's numeric id, which the Host does not read
 //   blocklist.json             { applications: [{ id, reason }], releases: [{ id, hash, reason }], publishers: [{ publisher, reason }] }
@@ -80,8 +82,10 @@ export function blocklistReason(blocklist, id, hash) {
 }
 
 /** index.json, from every Application file not unpublished: each at its
- *  latest Release, ordered by id. */
+ *  latest Release, ordered by id. Every other top-level field the index
+ *  holds, such as `report`, is a maintainer's and kept as it is. */
 export function indexOf(root) {
+  const { applications: _rebuilt, ...kept } = readJson(root, INDEX, {}) ?? {};
   const applications = applicationFiles(root)
     .filter((file) => file.unpublished !== true && file.releases.length > 0)
     .map((file) => {
@@ -97,5 +101,5 @@ export function indexOf(root) {
       };
     })
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  return { applications };
+  return { ...kept, applications };
 }
