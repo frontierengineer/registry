@@ -1,0 +1,136 @@
+# Checks a listing pull request and lands it when the checks pass. Nobody
+# reviews a listing by hand: the verdict is the decision.
+#
+# pull_request_target runs this file and the checker from the default branch,
+# never the pull request's copy, so a pull request cannot change the checks it
+# is held to. The pull request itself is read as data, and the Application's
+# repository is cloned, scanned and built with install scripts off; nothing of
+# either runs. The job that does that holds a read-only token; only the job
+# that lands the verdict may write, and it runs nothing but the Registry's own
+# code on the verdict.
+name: Listing
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    paths: ['listings/**']
+
+permissions: {}
+
+concurrency:
+  group: listing-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      outcome: ${{ steps.check.outputs.outcome }}
+    steps:
+      - name: Check out the Registry at its default branch
+        uses: actions/checkout@v4
+        with:
+          path: registry
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install the checker
+        working-directory: registry/pipeline
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Read the pull request's change, as data
+        working-directory: registry
+        env:
+          NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_COMMIT: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git fetch --quiet --no-tags origin "+refs/pull/${NUMBER}/head:refs/remotes/pull/head"
+          test "$(git rev-parse refs/remotes/pull/head)" = "$HEAD_COMMIT"
+          node pipeline/bin/pull-request.mjs --repository . --base HEAD --head "$HEAD_COMMIT" \
+            --changes "$RUNNER_TEMP/changes.json" --listing "$RUNNER_TEMP/listing.json"
+
+      - name: Check the listing
+        id: check
+        env:
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node registry/pipeline/bin/check.mjs --root registry --changes "$RUNNER_TEMP/changes.json" \
+            --listing "$RUNNER_TEMP/listing.json" --author "$AUTHOR" --out "$RUNNER_TEMP/verdict.json"
+          echo "outcome=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).outcome)' "$RUNNER_TEMP/verdict.json")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verdict
+          path: ${{ runner.temp }}/verdict.json
+          retention-days: 7
+
+  land:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Check out the Registry at its default branch
+        uses: actions/checkout@v4
+        with:
+          path: registry
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: verdict
+          path: ${{ runner.temp }}/verdict
+
+      - name: Land the verdict on the default branch
+        id: land
+        working-directory: registry
+        env:
+          NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_COMMIT: ${{ github.event.pull_request.head.sha }}
+          BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git config user.name "frontier-registry[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch --quiet --no-tags origin "+refs/pull/${NUMBER}/head:refs/remotes/pull/head"
+          test "$(git rev-parse refs/remotes/pull/head)" = "$HEAD_COMMIT"
+          landed="$(bash pipeline/bin/land.sh "$RUNNER_TEMP/verdict/verdict.json" "$NUMBER" "$HEAD_COMMIT" "$BRANCH" | tail -n 1)"
+          echo "landed=${landed}" >> "$GITHUB_OUTPUT"
+
+      - name: Tell the publisher
+        if: always() && steps.land.outcome != 'skipped'
+        working-directory: registry
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          OUTCOME: ${{ needs.check.outputs.outcome }}
+          LANDED: ${{ steps.land.outputs.landed }}
+          LAND_OUTCOME: ${{ steps.land.outcome }}
+        run: |
+          verdict="$RUNNER_TEMP/verdict/verdict.json"
+          unlanded=false
+          if [ "$OUTCOME" = listed ] || [ "$OUTCOME" = unpublished ]; then
+            if [ "$LAND_OUTCOME" != success ]; then unlanded=true; fi
+          fi
+          if [ "$unlanded" = true ]; then
+            printf 'The checks passed, and the change could not land on the Registry (%s). Publish again from Frontier to open a fresh pull request.\n' \
+              "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > "$RUNNER_TEMP/comment.md"
+          else
+            node pipeline/bin/say.mjs --verdict "$verdict" --commit "$LANDED" > "$RUNNER_TEMP/comment.md"
+          fi
+          gh pr comment "$NUMBER" --body-file "$RUNNER_TEMP/comment.md"
+          if [ "$OUTCOME" = rejected ] || [ "$unlanded" = true ]; then gh pr close "$NUMBER"; fi
+          if [ "$OUTCOME" = unavailable ] || [ "$unlanded" = true ]; then exit 1; fi

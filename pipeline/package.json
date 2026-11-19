@@ -1,0 +1,13 @@
+{
+  "name": "frontier-registry-pipeline",
+  "private": true,
+  "type": "module",
+  "description": "The checks a listing pull request passes before the Registry lists it, and the files it writes when it does.",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "esbuild": "0.28.2"
+  }
+}

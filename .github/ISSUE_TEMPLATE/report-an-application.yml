@@ -1,0 +1,29 @@
+name: Report an Application
+description: An Application the Registry lists is malicious, abusive or harmful. A maintainer reads every report and decides whether the blocklist names it.
+title: "Report: "
+labels: ["report"]
+body:
+  - type: input
+    id: application
+    attributes:
+      label: Application id
+      description: As Frontier shows it, such as github.com/acme/notes.
+      placeholder: github.com/owner/name
+    validations:
+      required: true
+  - type: input
+    id: release
+    attributes:
+      label: Release
+      description: The commit hash of the Release you saw it in, if you know it. Leave it empty when every Release is affected.
+  - type: textarea
+    id: what
+    attributes:
+      label: What it does
+      description: What you saw, and where in its source if you know. A report that names code is acted on fastest.
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        A report is public. If it describes a vulnerability that others could use before it is fixed, report it privately instead, through this repository's Security tab.
