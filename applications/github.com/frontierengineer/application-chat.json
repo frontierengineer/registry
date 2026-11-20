@@ -269,6 +269,276 @@
           ]
         }
       }
+    },
+    {
+      "hash": "acb1f707f769cfd91bc5d280d7a9e0bfc7da9270",
+      "listedAt": "2026-11-20T22:58:16.000Z",
+      "flags": [],
+      "platformBuild": "89cde725f3a3065b1ef8271cab3e50a47c45fb25",
+      "contributions": {
+        "id": "github.com/frontierengineer/application-chat",
+        "title": "Chat",
+        "color": "#6c5ce7",
+        "description": "Talk with agents. Start a chat on any runtime and worker, in a workspace or without one, and follow every turn as it runs.",
+        "sessions": {
+          "visibility": "public"
+        },
+        "surface": {
+          "panels": [
+            {
+              "id": "chats",
+              "title": "Chats",
+              "description": "Your chats with agents and the other public sessions: find one and open it in Chat, or start a new one.",
+              "icon": [
+                {
+                  "d": "M4 6h16M4 12h16M4 18h10",
+                  "kind": "outline"
+                }
+              ],
+              "minWidth": 240,
+              "minHeight": 320
+            },
+            {
+              "id": "chat",
+              "title": "Chat",
+              "description": "One chat with an agent: its conversation, as it runs, and the composer. Opens the chat chosen in Chats.",
+              "icon": [
+                {
+                  "d": "M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H9l-4 3.5V6a1 1 0 0 1 1-1z",
+                  "kind": "outline"
+                }
+              ],
+              "minWidth": 420,
+              "minHeight": 360,
+              "inputs": [
+                "keyboard"
+              ],
+              "fields": [
+                {
+                  "type": "select",
+                  "key": "chat",
+                  "label": "Chat",
+                  "description": "The chat this panel opens on. Empty opens on the last one you chose.",
+                  "choices": {
+                    "applicationId": "github.com/frontierengineer/application-chat",
+                    "optionSourceId": "chats"
+                  },
+                  "noneLabel": "The last one chosen",
+                  "emptyHint": "There are no chats yet."
+                }
+              ]
+            },
+            {
+              "id": "chat-compact",
+              "title": "Compact chat",
+              "description": "Your chats with agents, the list or one chat at a time, sized for a hand.",
+              "icon": [
+                {
+                  "d": "M8 3h8a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z",
+                  "kind": "outline"
+                },
+                {
+                  "d": "M11 18h2",
+                  "kind": "outline"
+                }
+              ],
+              "minWidth": 320,
+              "minHeight": 400,
+              "fields": [
+                {
+                  "type": "select",
+                  "key": "chat",
+                  "label": "Chat",
+                  "description": "The chat this panel opens on. Empty opens on the last one you chose.",
+                  "choices": {
+                    "applicationId": "github.com/frontierengineer/application-chat",
+                    "optionSourceId": "chats"
+                  },
+                  "noneLabel": "The last one chosen",
+                  "emptyHint": "There are no chats yet."
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "id": "new-chat",
+              "title": "New chat",
+              "description": "Brings a Chat panel forward on a new chat, where a person writes the first prompt and chooses the runtime, worker, model and workspace."
+            },
+            {
+              "id": "start-chat",
+              "title": "Start a chat",
+              "description": "Starts a chat with an agent on the given runtime and worker, sends it the prompt, and brings it forward in Chat.",
+              "input": [
+                {
+                  "type": "select",
+                  "key": "runtime",
+                  "label": "Runtime",
+                  "required": true,
+                  "choices": {
+                    "entity": "runtime"
+                  }
+                },
+                {
+                  "type": "select",
+                  "key": "worker",
+                  "label": "Worker",
+                  "required": true,
+                  "choices": {
+                    "entity": "worker"
+                  }
+                },
+                {
+                  "type": "text",
+                  "key": "prompt",
+                  "label": "Prompt",
+                  "required": true
+                },
+                {
+                  "type": "text",
+                  "key": "title",
+                  "label": "Title",
+                  "description": "Named from the prompt when left empty."
+                }
+              ]
+            },
+            {
+              "id": "open-chat",
+              "title": "Open chat",
+              "description": "Brings a chat forward in a Chat panel, in the deck shown.",
+              "input": [
+                {
+                  "type": "select",
+                  "key": "chat",
+                  "label": "Chat",
+                  "required": true,
+                  "choices": {
+                    "applicationId": "github.com/frontierengineer/application-chat",
+                    "optionSourceId": "chats"
+                  },
+                  "emptyHint": "There are no chats yet."
+                }
+              ]
+            },
+            {
+              "id": "prompt-chat",
+              "title": "Send to a chat",
+              "description": "Sends a prompt to a chat's agent, resuming the chat first if it was released. The prompt waits its turn while the agent is busy.",
+              "input": [
+                {
+                  "type": "select",
+                  "key": "chat",
+                  "label": "Chat",
+                  "required": true,
+                  "choices": {
+                    "applicationId": "github.com/frontierengineer/application-chat",
+                    "optionSourceId": "chats"
+                  },
+                  "emptyHint": "There are no chats yet."
+                },
+                {
+                  "type": "text",
+                  "key": "prompt",
+                  "label": "Prompt",
+                  "required": true
+                }
+              ]
+            },
+            {
+              "id": "release-chat",
+              "title": "Release chat",
+              "description": "Stops a chat's agent and frees its workspace slot. The conversation is kept, and the next prompt resumes it.",
+              "input": [
+                {
+                  "type": "select",
+                  "key": "chat",
+                  "label": "Chat",
+                  "required": true,
+                  "choices": {
+                    "applicationId": "github.com/frontierengineer/application-chat",
+                    "optionSourceId": "chats"
+                  },
+                  "emptyHint": "There are no chats yet."
+                }
+              ]
+            }
+          ],
+          "deckPresets": [
+            {
+              "id": "chats-and-chat",
+              "title": "Chats + Conversation",
+              "description": "Your chats beside the one you are in: pick one in Chats and it opens in Chat.",
+              "layout": {
+                "split": "across",
+                "children": [
+                  {
+                    "stack": [
+                      "chats"
+                    ]
+                  },
+                  {
+                    "stack": [
+                      "chat"
+                    ],
+                    "active": true
+                  }
+                ],
+                "shares": [
+                  1,
+                  2.4
+                ]
+              }
+            }
+          ],
+          "optionSources": [
+            {
+              "id": "chats",
+              "title": "Chats"
+            }
+          ],
+          "keybindings": [
+            {
+              "chord": "alt+n",
+              "actionId": "new-chat"
+            }
+          ]
+        },
+        "host": {
+          "methods": [
+            {
+              "id": "create-chat",
+              "title": "Create chat",
+              "description": "Starts a chat: a public session on a runtime and worker, optionally in a workspace, recorded in Chat. Input: runtimeId and workerId (strings, required); title (string); model ({ modelId, settings }); agentDefinitionId and personaId (strings); workspace, either { workspaceId } for an existing workspace on that worker or { workspaceProvisionerId, name?, base? } to mount one, which Chat unmounts when the chat is released; prompt (a string or prompt content parts) to send at once; wait (boolean, default true): false answers as soon as the chat is recorded, with sessionId null, and starts its agent in the background, the chat's record saying it is starting and, if it does not start, why. Answers { chatId, sessionId, turn: { turnId, queued } or null }."
+            },
+            {
+              "id": "prompt-chat",
+              "title": "Prompt chat",
+              "description": "Sends a prompt to a chat's agent. A released chat, or one whose session ended, is resumed first on a fresh session that continues the same conversation. A prompt sent while a turn runs is queued, the latest replacing any earlier queued one. Input: chatId (string), prompt (a string or prompt content parts), wait (boolean, default true): false answers at once when the chat must start again, with sessionId and turnId null, and sends the prompt once its agent runs. Answers { sessionId, turnId, queued }."
+            },
+            {
+              "id": "resume-chat",
+              "title": "Resume chat",
+              "description": "Starts a released chat again on a fresh session that continues its conversation, mounting its workspace if needed. Does nothing to a chat that is running. Input: chatId (string), wait (boolean, default true): false answers at once, with sessionId null, and starts it in the background. Answers { sessionId }."
+            },
+            {
+              "id": "release-chat",
+              "title": "Release chat",
+              "description": "Stops a chat's agent, ends its session and frees its workspace slot, keeping the conversation so the chat can resume. Input: chatId (string). Answers { released }, false when it was not running."
+            },
+            {
+              "id": "remove-chat",
+              "title": "Remove chat",
+              "description": "Releases a chat and removes it from Chat. Its workspace and the agent's own record of the conversation stay. Input: chatId (string). Answers { removed: true }."
+            },
+            {
+              "id": "list-chats",
+              "title": "List chats",
+              "description": "Every chat in Chat, most recently prompted first, each with its id, title, runtimeId, workerId, workspace, model, sessionId (null when released), agentSessionId, createdAt, lastPromptAt and releasedAt. Input: none. Answers { chats }."
+            }
+          ]
+        }
+      }
     }
   ]
 }
