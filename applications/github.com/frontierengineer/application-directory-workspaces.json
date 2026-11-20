@@ -1,0 +1,53 @@
+{
+  "id": "github.com/frontierengineer/application-directory-workspaces",
+  "repository": "https://github.com/frontierengineer/application-directory-workspaces",
+  "repositoryId": 1463737244,
+  "unpublished": false,
+  "releases": [
+    {
+      "hash": "caae4ca598fdded4acf4dc6b3b209857e9534426",
+      "listedAt": "2026-11-20T13:00:45.000Z",
+      "flags": [
+        "processes",
+        "filesystem"
+      ],
+      "platformBuild": "",
+      "contributions": {
+        "id": "github.com/frontierengineer/application-directory-workspaces",
+        "title": "Directories",
+        "color": "#2f9e44",
+        "description": "Gives each workspace a plain directory of its own on a worker, kept as it is between mounts.",
+        "worker": {
+          "workspaceProvisioner": {
+            "configuration": [
+              {
+                "type": "text",
+                "key": "directory",
+                "label": "Directory",
+                "description": "The directory on this worker that holds one directory for each workspace, as an absolute path or starting with ~/.",
+                "required": true,
+                "default": "~/Frontier workspaces",
+                "placeholder": "~/Frontier workspaces"
+              },
+              {
+                "type": "text",
+                "key": "template",
+                "label": "Template",
+                "description": "A directory whose files every new workspace starts with. Empty means a new workspace starts empty.",
+                "placeholder": "~/templates/project"
+              }
+            ],
+            "provisioning": {
+              "active": "Preparing a directory",
+              "slow": "Copying files into the new directory."
+            },
+            "slots": {
+              "default": 8,
+              "note": "How many workspaces can be mounted at once. An unmounted workspace keeps its directory."
+            }
+          }
+        }
+      }
+    }
+  ]
+}
