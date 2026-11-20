@@ -1,0 +1,7 @@
+# The blocklist is the one lever that reaches every installation, so no
+# automation may hold it: every change to it needs the named reviewer.
+/blocklist.json @ianbelcher
+# platform.json is written by Frontier's release workflow through its deploy
+# key, which the ruleset lets through; any other change needs the reviewer.
+/platform.json @ianbelcher
+/.github/CODEOWNERS @ianbelcher
