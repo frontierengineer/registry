@@ -2,7 +2,7 @@
 
 The central listing of Frontier Application Releases. Anyone can list an Application here, and no person reviews a listing: automated checks, hash pinning and a blocklist stand in for a gatekeeper.
 
-The Registry is files, not a server. Frontier's Host reads them anonymously from `https://raw.githubusercontent.com/frontierengineer/registry/main/`, and keeps each one for five minutes. The Registry has no accounts and no publish tokens: a publisher is whoever owns the GitHub repository an Application is published from.
+The Registry is files, not a server. Frontier's Host reads them anonymously from `https://raw.githubusercontent.com/frontierengineer/registry/main/`, keeps each one for five minutes, and then asks again with the file's ETag, so a file that has not changed is not downloaded again. The Registry has no accounts and no publish tokens: a publisher is whoever owns the GitHub repository an Application is published from.
 
 ## What is here
 
@@ -10,10 +10,10 @@ The Registry is files, not a server. Frontier's Host reads them anonymously from
 | --- | --- | --- |
 | `listings/<id>.json` | the publisher, by pull request | `{ id, repository, commit }`: the Application and the commit to list. The Host never reads it. |
 | `applications/<id>.json` | the pipeline | `{ id, repository, repositoryId, unpublished, releases }`: every Release the Registry ever listed, oldest first, kept after unpublishing. `repositoryId` is GitHub's numeric id for the repository it was first listed from. |
-| `index.json` | the pipeline, and `report` by hand | `{ report, applications: [{ id, repository, title, description, color, latest }] }`: every listed Application at its latest Release, which Browse reads, and `report`, the address where an install reports an Application. The pipeline rebuilds `applications` and keeps every other field. |
+| `index.json` | the pipeline, and `report` by hand | `{ report, applications: [{ id, title, description, color, latest: { hash, listedAt, flags } }] }`: every listed Application at its latest Release, holding only what Browse shows and filters on, and `report`, the address where an install reports an Application. Every Host downloads it to browse, so it carries no contributions: those stay in `applications/<id>.json`, which a Host reads when it installs, resolves or checks for an update. The pipeline rebuilds `applications` and keeps every other field. |
 | `checks/<commit hash>.json` | the pipeline | `{ repository, commitHash, outcome, reason, checkedAt }`: what the pipeline concluded of a commit, `listed` or `rejected` with the reason. |
 | `blocklist.json` | a maintainer, by hand | `{ applications: [{ id, reason }], releases: [{ id, hash, reason }], publishers: [{ publisher, reason }] }` |
-| `platform.json` | a maintainer, by hand | `{ builds: [{ buildId, publishedAt }] }`: the Platform builds published, so a Release is placed against them. |
+| `platform.json` | Frontier's release workflow | `{ builds: [{ buildId, publishedAt }] }`: the Platform builds published, one entry for each build of Frontier's main branch it publishes, pushed with a deploy key, so a Release is placed against them. |
 
 An id is its repository's: `github.com/<owner>/<name>`. A Release is
 
@@ -108,7 +108,7 @@ To pull one bad Release, add a `releases` entry for it, and the Application's ow
 
 ## Reporting an Application
 
-Open an issue with the **Report an Application** template. `index.json` names its address as `report`, so an install reports to the Registry it reads. Add `application=<id>` and `release=<commit hash>` to that address to fill in the report's fields, for example `https://github.com/frontierengineer/registry/issues/new?template=report-an-application.yml&application=github.com/acme/notes&release=<hash>`. Reports are public. If a report describes a vulnerability others could exploit before a fix, send it privately through the repository's Security tab instead.
+Open an issue with the **Report an Application** template. `index.json` names its address as `report`, so an install reports to the Registry it reads; Frontier reads it only when a person reports an Application. Add `application=<id>` and `release=<commit hash>` to that address to fill in the report's fields, for example `https://github.com/frontierengineer/registry/issues/new?template=report-an-application.yml&application=github.com/acme/notes&release=<hash>`. Reports are public. If a report describes a vulnerability others could exploit before a fix, send it privately through the repository's Security tab instead.
 
 ## Running the checks yourself
 
@@ -142,4 +142,4 @@ The workflow needs:
 - **Fork pull requests:** keep the default, which never gives a fork's workflow secrets. The workflow runs on `pull_request_target`, so it always runs the default branch's copy of itself and of the checker, never the pull request's.
 - **Branch protection on `main`:** if pushes are restricted, allow GitHub Actions to push. The pipeline lands each verdict as one commit on `main`, and its push carrying the pull request's head is what GitHub records as the merge.
 
-A maintainer changes the blocklist, `platform.json`, the pipeline and this README by ordinary commits. A listing pull request can never change them.
+A maintainer changes the blocklist, the pipeline and this README by ordinary commits, and Frontier's release workflow adds to `platform.json`. A listing pull request can never change them.

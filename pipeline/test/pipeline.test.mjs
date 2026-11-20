@@ -106,8 +106,9 @@ test('dry run: a listing pull request is checked, listed, replaced, refused and 
   assert.equal(file.releases[0].contributions.title, 'Notes');
   assert.deepEqual(read(root, `checks/${first}.json`), { repository: 'git@github.com:acme/notes.git', commitHash: first, outcome: 'listed', reason: '', checkedAt: '2026-11-19T10:00:00.000Z' });
   assert.equal(read(root, 'index.json').report, REPORT, 'rebuilding the index keeps where an Application is reported');
-  assert.deepEqual(read(root, 'index.json').applications.map(({ id, repository, title, description, color, latest }) => [id, repository, title, description, color, latest.hash]),
-    [[NOTES, 'https://github.com/acme/notes', 'Notes', 'Markdown notes on every surface.', '#3b82f6', first]]);
+  assert.deepEqual(read(root, 'index.json').applications,
+    [{ id: NOTES, title: 'Notes', description: 'Markdown notes on every surface.', color: '#3b82f6', latest: { hash: first, listedAt: '2026-11-19T10:00:00.000Z', flags: ['network'] } }],
+    'the index holds only what Browse shows: no repository, no Platform build and no contributions, which stay in the Application file');
 
   const refused = async (changes, text, pattern, author) => {
     const verdict = await check(changes, text, author);
@@ -164,4 +165,22 @@ test('dry run: a listing pull request is checked, listed, replaced, refused and 
   assert.equal(read(root, `applications/${NOTES}.json`).unpublished, false);
   assert.deepEqual(read(root, `applications/${NOTES}.json`).releases.map(({ hash, listedAt }) => [hash, listedAt]), [[first, '2026-11-19T10:00:00.000Z'], [second, '2026-11-19T11:00:00.000Z']]);
   assert.equal(existsSync(join(root, 'listings')), true);
+});
+
+test('the index holds only what Browse shows, however much a Release contributes, and keeps the fields a maintainer wrote', () => {
+  const root = emptyRegistry();
+  const at = '2026-11-19T10:00:00.000Z';
+  const panels = Array.from({ length: 200 }, (_, n) => ({ id: `panel-${n}`, title: `Panel ${n}`, description: 'A panel that takes room in the Application file and none in the index.' }));
+  const listed = (id, commit, contributions, flags = []) => ({ outcome: 'listed', id, repository: `https://${id}`, cloneUrl: `https://${id}`, repositoryId: id.length, commit, flags, contributions });
+  recordVerdict(root, listed(NOTES, 'a'.repeat(40), { id: NOTES, title: 'Notes', description: 'Markdown notes.', color: '#3b82f6', surface: { panels } }, ['network']), at);
+  recordVerdict(root, listed('github.com/acme/bare', 'b'.repeat(40), { id: 'github.com/acme/bare' }), at);
+  const index = read(root, 'index.json');
+  assert.deepEqual(Object.keys(index), ['report', 'applications']);
+  assert.equal(index.report, REPORT);
+  assert.deepEqual(index.applications, [
+    { id: 'github.com/acme/bare', title: 'github.com/acme/bare', description: '', color: '', latest: { hash: 'b'.repeat(40), listedAt: at, flags: [] } },
+    { id: NOTES, title: 'Notes', description: 'Markdown notes.', color: '#3b82f6', latest: { hash: 'a'.repeat(40), listedAt: at, flags: ['network'] } },
+  ]);
+  assert.deepEqual(read(root, `applications/${NOTES}.json`).releases[0].contributions.surface.panels, panels, 'the Application file keeps every contribution');
+  assert.ok(readFileSync(join(root, 'index.json')).length < 1024, 'the index does not grow with what a Release contributes');
 });

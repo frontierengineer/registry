@@ -1,7 +1,10 @@
 // The Registry's published files, as Frontier's Host reads them
 // (containers/host/modules/registry/interface.ts):
 //
-//   index.json                 { report, applications: [{ id, repository, title, description, color, latest: Release }] }
+//   index.json                 { report, applications: [{ id, title, description, color, latest: { hash, listedAt, flags } }] }
+//                              only what Browse shows and filters on, so every Host can download it
+//                              to browse however many Applications are listed; what a Release
+//                              contributes is in applications/<id>.json, read when it is needed.
 //                              report is where an install reports an Application: the issue form,
 //                              prefilled by ?application=<id>&release=<hash>; kept by hand, never rebuilt
 //   applications/<id>.json     { id, repository, repositoryId, unpublished, releases: Release[] }   oldest first, never emptied;
@@ -82,22 +85,22 @@ export function blocklistReason(blocklist, id, hash) {
 }
 
 /** index.json, from every Application file not unpublished: each at its
- *  latest Release, ordered by id. Every other top-level field the index
- *  holds, such as `report`, is a maintainer's and kept as it is. */
+ *  latest Release, ordered by id, holding only what Browse shows and filters
+ *  on. Every other top-level field the index holds, such as `report`, is a
+ *  maintainer's and kept as it is. */
 export function indexOf(root) {
   const { applications: _rebuilt, ...kept } = readJson(root, INDEX, {}) ?? {};
   const applications = applicationFiles(root)
     .filter((file) => file.unpublished !== true && file.releases.length > 0)
     .map((file) => {
-      const latest = file.releases[file.releases.length - 1];
-      const declared = latest.contributions ?? {};
+      const { hash, listedAt, flags, contributions } = file.releases[file.releases.length - 1];
+      const declared = contributions ?? {};
       return {
         id: file.id,
-        repository: file.repository,
         title: typeof declared.title === 'string' ? declared.title : file.id,
         description: typeof declared.description === 'string' ? declared.description : '',
         color: typeof declared.color === 'string' ? declared.color : '',
-        latest,
+        latest: { hash, listedAt, flags },
       };
     })
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
