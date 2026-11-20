@@ -153,6 +153,53 @@ test('dry run of the workflow: a refused listing records only its check, and a p
   assert.match(sneakyVerdict.reason, /changes 2: blocklist.json, listings/);
 });
 
+test('dry run of the workflow: a refused commit is checked again when its pull request is reopened, and lands; only a listed check is final', async () => {
+  const ORG = 'github.com/acme-org/notes';
+  const remote = registryRemote();
+  const repos = repositories();
+  const release = repos.commit('acme-org', 'notes', { 'contributions.json': contributionsText(ORG), 'surface.ts': 'export const registration = {};\n' });
+  const head = remote.pullRequest(10, { [`listings/${ORG}.json`]: `${JSON.stringify({ id: ORG, repository: 'https://github.com/acme-org/notes', commit: release }, null, 2)}\n` });
+  const known = { 'acme-org/notes': { owner: 'acme-org', type: 'Organization', repositoryId: 5151 } };
+
+  /** One run of the workflow on pull request 10: read, check, land. */
+  const runOnce = async (members) => {
+    const api = await fakeGitHubApi({ registry: 'frontierengineer/registry', origin: remote.origin, repositories: known, members });
+    const scratch = mkdtempSync(join(remote.base, 'temp-'));
+    await readThroughApi(api, 10, head, 'alice', scratch);
+    await api.close();
+    const checker = mkdtempSync(join(remote.base, 'checker-'));
+    git(['clone', '-q', remote.origin, checker], remote.base);
+    const verdict = await checkFromRead(checker, scratch, 'alice', repos);
+    writeFileSync(join(scratch, 'verdict.json'), JSON.stringify(verdict));
+    const landed = spawnSync('bash', [join(PIPELINE, 'bin', 'land.sh'), join(scratch, 'verdict.json'), '10', head, 'main'], { cwd: remote.runner(10), encoding: 'utf8' });
+    assert.equal(landed.status, 0, landed.stderr);
+    const published = mkdtempSync(join(remote.base, 'published-'));
+    git(['clone', '-q', remote.origin, published], remote.base);
+    return { verdict, published };
+  };
+
+  // alice is a member of acme-org, privately: refused, and the refusal is recorded on main.
+  const first = await runOnce({});
+  assert.equal(first.verdict.outcome, 'rejected');
+  assert.match(first.verdict.reason, /open it as a public member of acme-org/);
+  assert.equal(read(first.published, `checks/${release}.json`).outcome, 'rejected');
+  assert.equal(spawnSync('git', ['merge-base', '--is-ancestor', head, 'HEAD'], { cwd: first.published }).status, 1);
+
+  // Her membership made public, the same pull request reopened: checked again from the start, listed and merged.
+  const second = await runOnce({ 'acme-org': ['alice'] });
+  assert.equal(second.verdict.outcome, 'listed', second.verdict.reason);
+  assert.equal(spawnSync('git', ['merge-base', '--is-ancestor', head, 'HEAD'], { cwd: second.published }).status, 0, 'the reopened pull request is merged');
+  assert.deepEqual(read(second.published, `checks/${release}.json`), { repository: 'https://github.com/acme-org/notes', commitHash: release, outcome: 'listed', reason: '', checkedAt: read(second.published, `checks/${release}.json`).checkedAt });
+  assert.deepEqual(read(second.published, 'index.json').applications.map(({ id, latest }) => [id, latest.hash]), [[ORG, release]]);
+  assert.equal(read(second.published, `applications/${ORG}.json`).repositoryId, 5151);
+
+  // Listed is final: a later refusal of the same hash cannot overwrite it.
+  const scratch = mkdtempSync(join(remote.base, 'temp-'));
+  writeFileSync(join(scratch, 'verdict.json'), JSON.stringify({ outcome: 'rejected', id: ORG, repository: 'https://github.com/acme-org/notes', commit: release, reason: 'refused later' }));
+  node('record.mjs', ['--root', '.', '--verdict', join(scratch, 'verdict.json')], second.published);
+  assert.equal(read(second.published, `checks/${release}.json`).outcome, 'listed');
+});
+
 test('the read and land jobs install no packages, so what they run loads without them', () => {
   const bare = mkdtempSync(join(tmpdir(), 'registry-bare-'));
   cpSync(join(PIPELINE, 'bin'), join(bare, 'bin'), { recursive: true });
