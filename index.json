@@ -273,6 +273,37 @@
           }
         }
       }
+    },
+    {
+      "id": "github.com/frontierengineer/application-claude-code",
+      "repository": "https://github.com/frontierengineer/application-claude-code",
+      "title": "Claude Code",
+      "description": "Runs Claude Code as an agent on your workers, through its Agent Client Protocol adapter. Claude Code needs a Claude subscription or an Anthropic API key, signed in on each worker.",
+      "color": "#d97757",
+      "latest": {
+        "hash": "6557882068212299f3a0c1bf5454e029f45ed8b9",
+        "listedAt": "2026-11-20T12:58:46.000Z",
+        "flags": [
+          "processes",
+          "filesystem"
+        ],
+        "platformBuild": "",
+        "contributions": {
+          "id": "github.com/frontierengineer/application-claude-code",
+          "title": "Claude Code",
+          "color": "#d97757",
+          "description": "Runs Claude Code as an agent on your workers, through its Agent Client Protocol adapter. Claude Code needs a Claude subscription or an Anthropic API key, signed in on each worker.",
+          "surface": {
+            "configuration": {}
+          },
+          "worker": {
+            "runtime": {
+              "title": "Claude Code",
+              "options": []
+            }
+          }
+        }
+      }
     }
   ]
 }
