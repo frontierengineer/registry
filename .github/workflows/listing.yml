@@ -115,11 +115,15 @@ jobs:
       contents: write
       pull-requests: write
     steps:
+      # The landing commit is pushed with the REGISTRY_LAND_KEY deploy key: the
+      # main branch's ruleset lets deploy keys through, and GitHub's own Actions
+      # app cannot be named there, so the job's token alone would be refused.
       - name: Check out the Registry at its default branch
         uses: actions/checkout@v4
         with:
           path: registry
           fetch-depth: 0
+          ssh-key: ${{ secrets.REGISTRY_LAND_KEY }}
 
       - uses: actions/setup-node@v4
         with:
