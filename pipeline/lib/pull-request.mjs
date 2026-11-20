@@ -2,7 +2,7 @@
 // changes and the listing file's content at its head. Nothing of the pull
 // request is checked out, fetched or run.
 
-import { listingChangeOf } from './check.mjs';
+import { listingChangeOf } from './listing.mjs';
 
 const API = 'https://api.github.com';
 const STATUS = { added: 'A', removed: 'D', modified: 'M', renamed: 'R', copied: 'C', changed: 'T', unchanged: 'U' };

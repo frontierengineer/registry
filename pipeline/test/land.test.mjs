@@ -152,3 +152,14 @@ test('dry run of the workflow: a refused listing records only its check, and a p
   assert.equal(sneakyVerdict.outcome, 'rejected');
   assert.match(sneakyVerdict.reason, /changes 2: blocklist.json, listings/);
 });
+
+test('the read and land jobs install no packages, so what they run loads without them', () => {
+  const bare = mkdtempSync(join(tmpdir(), 'registry-bare-'));
+  cpSync(join(PIPELINE, 'bin'), join(bare, 'bin'), { recursive: true });
+  cpSync(join(PIPELINE, 'lib'), join(bare, 'lib'), { recursive: true });
+  writeFileSync(join(bare, 'package.json'), readFileSync(join(PIPELINE, 'package.json')));
+  for (const script of ['pull-request.mjs', 'record.mjs', 'say.mjs']) {
+    const ran = spawnSync('node', [join(bare, 'bin', script)], { cwd: bare, encoding: 'utf8' });
+    assert.doesNotMatch(ran.stderr, /ERR_MODULE_NOT_FOUND|Cannot find package/, `${script} needs a package: ${ran.stderr}`);
+  }
+});

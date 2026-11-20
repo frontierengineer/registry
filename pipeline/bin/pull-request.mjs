@@ -12,7 +12,7 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { askGitHub } from '../lib/check.mjs';
+import { askGitHub } from '../lib/listing.mjs';
 import { liveGitHub, recordingGitHub } from '../lib/github.mjs';
 import { readPullRequest } from '../lib/pull-request.mjs';
 
