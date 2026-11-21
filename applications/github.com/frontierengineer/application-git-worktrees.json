@@ -141,6 +141,144 @@
           ]
         }
       }
+    },
+    {
+      "hash": "4e90ad3607a4047b54bed23bfa230d25243660b6",
+      "listedAt": "2026-11-21T17:51:40.000Z",
+      "flags": [
+        "processes",
+        "filesystem"
+      ],
+      "platformBuild": "0c5c25fa4e0594ed06655b1e9102c993e190ae38",
+      "contributions": {
+        "id": "github.com/frontierengineer/application-git-worktrees",
+        "title": "Git worktrees",
+        "color": "#e8590c",
+        "description": "Gives each workspace its own git worktree and branch beside a repository on a worker, keeps its uncommitted work when it is unmounted, and shows what changed in it to review, commit or discard.",
+        "worker": {
+          "workspaceProvisioner": {
+            "configuration": [
+              {
+                "type": "text",
+                "key": "repository",
+                "label": "Repository",
+                "description": "The git checkout on this worker that workspaces branch from, as an absolute path or starting with ~/.",
+                "required": true,
+                "placeholder": "~/code/project"
+              },
+              {
+                "type": "text",
+                "key": "remote",
+                "label": "Clone from",
+                "description": "A repository URL to clone into the repository path when nothing is there yet.",
+                "placeholder": "git@github.com:acme/project.git"
+              },
+              {
+                "type": "text",
+                "key": "base",
+                "label": "Base",
+                "description": "The branch or commit a new workspace starts from. Empty means the remote's default branch, or else the checkout's current commit.",
+                "placeholder": "origin/main"
+              },
+              {
+                "type": "text",
+                "key": "branchPrefix",
+                "label": "Branch prefix",
+                "description": "Put before each workspace's name to make its branch.",
+                "default": "frontier/"
+              },
+              {
+                "type": "text",
+                "key": "poolDirectory",
+                "label": "Worktree directory",
+                "description": "Where the worktrees live. Empty means a .frontier-worktrees directory beside the repository."
+              }
+            ],
+            "provisioning": {
+              "active": "Preparing a git worktree",
+              "slow": "Checking out the repository. A large repository takes a while."
+            },
+            "slots": {
+              "default": 4,
+              "note": "Each slot is a git worktree on disk, so each costs a checkout's worth of space."
+            }
+          }
+        },
+        "surface": {
+          "panels": [
+            {
+              "id": "changes",
+              "title": "Changes",
+              "description": "What changed in each mounted git workspace, beside the list of them, to review, commit or discard.",
+              "icon": [
+                {
+                  "d": "M6 4v12M6 16a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM18 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM18 8c0 5-6 4-11.5 8",
+                  "kind": "outline"
+                }
+              ],
+              "minWidth": 640,
+              "minHeight": 360,
+              "inputs": [
+                "pointer"
+              ]
+            },
+            {
+              "id": "changes-compact",
+              "title": "Changes, one at a time",
+              "description": "The mounted git workspaces, then what changed in the one you choose.",
+              "icon": [
+                {
+                  "d": "M6 4v12M6 16a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM18 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM18 8c0 5-6 4-11.5 8",
+                  "kind": "outline"
+                }
+              ],
+              "minWidth": 320,
+              "minHeight": 320
+            }
+          ],
+          "actions": [
+            {
+              "id": "review-changes",
+              "title": "Review changes",
+              "description": "Brings Changes forward in the deck shown, which shows what changed in each mounted git workspace."
+            }
+          ]
+        },
+        "host": {
+          "methods": [
+            {
+              "id": "list-workspaces",
+              "title": "List git workspaces",
+              "description": "Every workspace mounted in a git worktree by this provisioner. Input: none. Answers { workspaces: [{ workspaceId, name, branch, workerId, slotDirectory, repository, workspaceProvisionerId, mountedAt }] }, most recently mounted first."
+            },
+            {
+              "id": "workspace-status",
+              "title": "Workspace status",
+              "description": "What changed in a mounted git workspace. Input: workspaceId (string). Answers { workspace, branch, upstream, ahead, behind, files: [{ path, originalPath, kind, staged }], lastCommit }, where kind is modified, added, deleted, renamed, copied, untracked, conflicted or type-changed, and lastCommit is how the last commit-workspace in it ended ({ state: committing, at }, { state: committed, at, commit, files } or { state: failed, at, message }), or null."
+            },
+            {
+              "id": "workspace-diff",
+              "title": "Workspace diff",
+              "description": "One file's changes in a mounted git workspace against its last commit, as a unified diff; an untracked file shows as wholly added. Input: workspaceId and path (strings, the path relative to the workspace). Answers { diff, truncated, binary }, the diff cut at 400 KB, binary true when git shows no lines because the file is binary."
+            },
+            {
+              "id": "workspace-log",
+              "title": "Workspace log",
+              "description": "The latest commits of a mounted git workspace's branch, newest first. Input: workspaceId (string), limit (number, default 30, at most 200). Answers { commits: [{ hash, shortHash, author, at, subject }] }."
+            },
+            {
+              "id": "commit-workspace",
+              "title": "Commit workspace",
+              "description": "Commits changes in a mounted git workspace to its branch, untracked files included, with the worker's own git identity and hooks. Input: workspaceId (string), message (string, required), paths (strings relative to the workspace; every change when left out). A subscription, since hooks can take a while: it publishes { state: started } at once, then { state: step, step } as it adds the changes, as it commits, and as each of the repository's hooks starts, then { state: committed, commit, files } or { state: failed, message }, and ends. The commit runs to its end if the subscriber leaves, and workspace-status reports how it ended as lastCommit."
+            },
+            {
+              "id": "discard-changes",
+              "title": "Discard changes",
+              "description": "Throws away the uncommitted changes to the given files in a mounted git workspace, returning them to their last commit and deleting untracked ones. This cannot be undone. Input: workspaceId (string), paths (strings relative to the workspace, required). Answers { discarded }."
+            }
+          ]
+        }
+      }
     }
   ]
 }
