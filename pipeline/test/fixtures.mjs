@@ -31,6 +31,15 @@ export function repositories() {
   const pathOf = ({ owner, name }) => join(base, owner.toLowerCase(), name.toLowerCase());
   return {
     cloneUrlFor: (parts) => pathOf(parts),
+    /** GitHub's codeload, answered from the repositories on disk: the
+     *  gzipped tar `git archive` makes of the commit; `failed` for a commit
+     *  or repository not there. */
+    archiveFor: async (url) => {
+      const found = /^https:\/\/codeload\.github\.com\/([^/]+)\/([^/]+)\/tar\.gz\/([0-9a-f]{40})$/.exec(url);
+      if (found === null) return { kind: 'failed', reason: `${url} answered 404` };
+      const ran = spawnSync('git', ['archive', '--format=tar.gz', `--prefix=${found[2]}-${found[3]}/`, found[3]], { cwd: pathOf({ owner: found[1], name: found[2] }) });
+      return ran.status === 0 ? { kind: 'downloaded', bytes: new Uint8Array(ran.stdout) } : { kind: 'failed', reason: `${url} answered 404` };
+    },
     /** Commits the files to the repository's main branch; answers the hash. */
     commit: (owner, name, files) => {
       const path = pathOf({ owner, name });

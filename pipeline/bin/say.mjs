@@ -16,7 +16,7 @@ if (verdict.outcome === 'listed') {
   lines.push(`Unpublished **${verdict.id}**: it leaves Browse and new installs. Every Release it had stays recorded, so installs that run one keep it.`);
 } else if (verdict.outcome === 'rejected') {
   lines.push(`Not listed${verdict.id ? ` **${verdict.id}**` : ''}${verdict.commit ? ` at \`${verdict.commit}\`` : ''}: ${verdict.reason}`);
-  lines.push('', 'Fix it and publish again from Frontier; that opens a new pull request. Nobody reviews a listing by hand, so this reason is the whole of the decision.');
+  lines.push('', 'Fix it, push the fix and open the listing pull request again with the new commit. Nobody reviews a listing by hand, so this reason is the whole of the decision.');
 } else {
   lines.push(`The check could not finish: ${verdict.reason}. It runs again when the pull request is reopened or its listing changes.`);
 }

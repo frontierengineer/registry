@@ -165,7 +165,7 @@ jobs:
             if [ "$LAND_OUTCOME" != success ]; then unlanded=true; fi
           fi
           if [ "$unlanded" = true ]; then
-            printf 'The checks passed, and the change could not land on the Registry (%s). Publish again from Frontier to open a fresh pull request.\n' \
+            printf 'The checks passed, and the change could not land on the Registry (%s). Open the listing pull request again to try once more.\n' \
               "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > "$RUNNER_TEMP/comment.md"
           else
             node pipeline/bin/say.mjs --verdict "$verdict" --commit "$LANDED" > "$RUNNER_TEMP/comment.md"

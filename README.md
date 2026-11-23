@@ -20,6 +20,7 @@ An id is its repository's: `github.com/<owner>/<name>`. A Release is
 ```json
 {
   "hash": "<40-character commit hash>",
+  "sourceSha256": "<the source digest of the commit's files, 64 lowercase hex digits>",
   "listedAt": "<when the Registry listed it, ISO-8601 UTC>",
   "flags": ["<what the scan saw: network, processes, filesystem, dynamic code, obfuscation>"],
   "platformBuild": "<the newest Platform build when it was listed, or empty>",
@@ -27,17 +28,23 @@ An id is its repository's: `github.com/<owner>/<name>`. A Release is
 }
 ```
 
+`sourceSha256` pins the Release's files. Frontier's Host installs a Release by downloading the gzipped tar GitHub serves for the commit at `https://codeload.github.com/<owner>/<name>/tar.gz/<hash>` over HTTPS, with no git, unpacking it, and refusing it unless its files have this digest. The digest is of the files alone, never of the archive's bytes: GitHub makes its archives as they are asked for and has changed their compression before, and a pin of the bytes would then refuse every install though no file changed.
+
+The source digest is the SHA-256 of one record per regular file, in the order of their paths compared as UTF-8 bytes: `x` when the file is executable or `-` when not, a space, the SHA-256 of its bytes in lowercase hex, a space, its path relative to the Application's root with `/` between segments, and a NUL byte. Directories add nothing. The Application's root is the archive's top when `contributions.json` is there, and otherwise its one top-level directory, which is how GitHub's archives are laid out. An archive holding a link has no digest, and is refused. `pipeline/lib/source.mjs` computes it, and Frontier's Host and build compute the same, each held to the same test vector (in `pipeline/test/pipeline.test.mjs`). `node pipeline/bin/backfill-sources.mjs --root .` records it on any Release listed before the field existed.
+
+A key a Release or an Application file holds that a Host does not know is read past, so adding a field never stops an installation that predates it.
+
 A Release is a commit and nothing else. It has no version number: when the Registry listed it places it before or after another Release and every Platform build. That is the time the Registry listed its hash, never the commit's own timestamp. Once listed, a Release is never changed or removed.
 
 ## How a listing gets in
 
-1. **Publish from Frontier.** Frontier pushes the Application to its repository and opens a pull request here from your fork. The pull request adds or replaces one file, `listings/<id>.json`, which names the repository and the commit hash. You can also open that pull request by hand.
+1. **Push the commit and open the listing pull request.** You, or an Agent working for you, push the Application to its GitHub repository and open a pull request here from your fork. Frontier itself does not publish: an Agent with your `git` and `gh` does. The pull request adds or replaces one file, `listings/<id>.json`, which names the repository and the commit hash.
 2. **The pipeline checks it.** It reads the pull request as data, then clones, scans and builds the commit without running any of it. See [What the pipeline checks](#what-the-pipeline-checks).
 3. **It lands or it is refused.**
    - **When every check passes,** the pipeline merges the pull request. In the same commit it writes the new Release into `applications/<id>.json`, `index.json` and `checks/<hash>.json`, and that moment is the Release's time. It comments on the pull request with any flags the scan raised. Installs see the Release within about ten minutes: GitHub caches the file for about five minutes, and each Host keeps it for five more.
-   - **When a check fails,** the pipeline writes the reason to `checks/<hash>.json`, where your Frontier reads it. It also comments the reason on the pull request and closes it. Fix the problem, then publish again, which opens a new pull request.
+   - **When a check fails,** the pipeline writes the reason to `checks/<hash>.json`, where you or your Agent can read it. It also comments the reason on the pull request and closes it. Fix the problem, push it, then open the listing pull request again with the new commit.
 
-Every later Release goes the same way: publishing again replaces your listing file with the new commit.
+Every later Release goes the same way: a new pull request replaces your listing file with the new commit.
 
 **Unpublishing.** Open a pull request that deletes your `listings/<id>.json`. Once it lands, the Application leaves Browse and new installs, and every Release it had stays recorded, so an install or an Application Set that names one can still reach it. Publishing again later lists it again.
 
@@ -51,7 +58,7 @@ The checks run in this order, and the first one that fails refuses the listing a
    - The commit is a full 40-character hash.
    - The id is the repository's id, the way Frontier derives it from any form of the URL.
    - The repository is on GitHub.
-3. **The publisher owns the repository.** The pull request comes from the repository's owner. For an organization's repository, it comes from a public member of that organization. The repository must exist and be public, since every install clones it anonymously. It must also be the same GitHub repository the id was first listed from: GitHub's numeric repository id must match. A name taken over after its repository was deleted or moved cannot list under the old id, and cannot unpublish it either.
+3. **The publisher owns the repository.** The pull request comes from the repository's owner. For an organization's repository, it comes from a public member of that organization. The repository must exist and be public, since every install downloads its source archive anonymously. It must also be the same GitHub repository the id was first listed from: GitHub's numeric repository id must match. A name taken over after its repository was deleted or moved cannot list under the old id, and cannot unpublish it either.
 4. **The blocklist does not name it.** That covers the Application, the Release, and its publisher.
 5. **The name is not a typosquat.** The id is not within typosquatting distance of an id another owner listed. "Distance" means either of these, compared without case and without `github.com/`:
    - the two ids are equal once characters that look alike (`0`/`o`, `1`/`l`/`i`, `5`/`s`, `rn`/`m`, `vv`/`w`) are folded together and `-`, `_` and `.` are dropped;
@@ -83,6 +90,7 @@ The checks run in this order, and the first one that fails refuses the listing a
     - `translations.json` must be complete.
 
     The pipeline does not type-check, and it runs none of the Application's code or tests.
+13. **Its source can be pinned.** The pipeline downloads the commit's source archive from GitHub and records the source digest of its files as the Release's `sourceSha256`. An archive holding a link is refused, since Frontier installs none. When the archive cannot be downloaded, the check cannot finish and nothing is listed; it runs again when the pull request is reopened.
 
 **Flags.** The scan reads the built Bundles, which hold the Application's code and every package it uses. It records what it sees on the Release as flags, each a short word from a fixed list that Frontier words for the install prompt. A flag does not refuse a listing. The install prompt shows each flag, so a person decides with them in view. The flags are:
 
