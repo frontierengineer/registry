@@ -6,7 +6,7 @@
 
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { isArchiveSha256 } from './archive.mjs';
+import { isSourceSha256 } from './source.mjs';
 import { gitHubPartsOf, idProblem, isCommitHash } from './identity.mjs';
 import { applicationPath, checkPath, INDEX, indexOf, platformBuildAt, readJson, writeJson } from './registry.mjs';
 
@@ -29,7 +29,7 @@ export function verdictProblem(verdict) {
   if (idProblem(verdict.id) !== null || gitHubPartsOf(verdict.id) === null) return `the verdict names no Application id it can write: ${verdict.id}`;
   if (verdict.outcome === 'unpublished') return null;
   if (!isCommitHash(verdict.commit)) return `the verdict names no commit hash: ${verdict.commit}`;
-  if (!isArchiveSha256(verdict.archiveSha256)) return `the verdict names no source archive SHA-256: ${verdict.archiveSha256}`;
+  if (!isSourceSha256(verdict.sourceSha256)) return `the verdict names no source digest: ${verdict.sourceSha256}`;
   if (typeof verdict.repository !== 'string' || typeof verdict.cloneUrl !== 'string' || !Number.isInteger(verdict.repositoryId) || !Array.isArray(verdict.flags) || typeof verdict.contributions !== 'object') return 'the verdict is not a listing';
   return null;
 }
@@ -58,7 +58,7 @@ export function recordVerdict(root, verdict, at) {
     const relisted = releases.length > 0 && releases[releases.length - 1].hash === verdict.commit;
     const next = relisted ? releases : [...releases, {
       hash: verdict.commit,
-      archiveSha256: verdict.archiveSha256,
+      sourceSha256: verdict.sourceSha256,
       listedAt: at,
       flags: verdict.flags,
       platformBuild: platformBuildAt(root, at),

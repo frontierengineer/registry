@@ -20,7 +20,7 @@ An id is its repository's: `github.com/<owner>/<name>`. A Release is
 ```json
 {
   "hash": "<40-character commit hash>",
-  "archiveSha256": "<SHA-256 of the commit's source archive, 64 lowercase hex digits>",
+  "sourceSha256": "<the source digest of the commit's files, 64 lowercase hex digits>",
   "listedAt": "<when the Registry listed it, ISO-8601 UTC>",
   "flags": ["<what the scan saw: network, processes, filesystem, dynamic code, obfuscation>"],
   "platformBuild": "<the newest Platform build when it was listed, or empty>",
@@ -28,7 +28,11 @@ An id is its repository's: `github.com/<owner>/<name>`. A Release is
 }
 ```
 
-`archiveSha256` pins the Release's source archive: the SHA-256 of the exact bytes GitHub serves for the commit at `https://codeload.github.com/<owner>/<name>/tar.gz/<hash>`. Frontier's Host installs a Release by downloading that archive over HTTPS, with no git, and refuses one whose bytes hash otherwise. The pipeline downloads the archive twice when it lists a Release and records the hash only when both downloads agree; `node pipeline/bin/backfill-archives.mjs --root .` records it on any Release listed before the field existed.
+`sourceSha256` pins the Release's files. Frontier's Host installs a Release by downloading the gzipped tar GitHub serves for the commit at `https://codeload.github.com/<owner>/<name>/tar.gz/<hash>` over HTTPS, with no git, unpacking it, and refusing it unless its files have this digest. The digest is of the files alone, never of the archive's bytes: GitHub makes its archives as they are asked for and has changed their compression before, and a pin of the bytes would then refuse every install though no file changed.
+
+The source digest is the SHA-256 of one record per regular file, in the order of their paths compared as UTF-8 bytes: `x` when the file is executable or `-` when not, a space, the SHA-256 of its bytes in lowercase hex, a space, its path relative to the Application's root with `/` between segments, and a NUL byte. Directories add nothing. The Application's root is the archive's top when `contributions.json` is there, and otherwise its one top-level directory, which is how GitHub's archives are laid out. An archive holding a link has no digest, and is refused. `pipeline/lib/source.mjs` computes it, and Frontier's Host and build compute the same, each held to the same test vector (in `pipeline/test/pipeline.test.mjs`). `node pipeline/bin/backfill-sources.mjs --root .` records it on any Release listed before the field existed.
+
+A key a Release or an Application file holds that a Host does not know is read past, so adding a field never stops an installation that predates it.
 
 A Release is a commit and nothing else. It has no version number: when the Registry listed it places it before or after another Release and every Platform build. That is the time the Registry listed its hash, never the commit's own timestamp. Once listed, a Release is never changed or removed.
 
@@ -86,7 +90,7 @@ The checks run in this order, and the first one that fails refuses the listing a
     - `translations.json` must be complete.
 
     The pipeline does not type-check, and it runs none of the Application's code or tests.
-13. **Its source archive can be pinned.** The pipeline downloads the commit's source archive from GitHub twice, and both downloads must hash alike; that SHA-256 is recorded as the Release's `archiveSha256`. When the archive cannot be downloaded, or GitHub serves two different ones, the check cannot finish and nothing is listed; it runs again when the pull request is reopened.
+13. **Its source can be pinned.** The pipeline downloads the commit's source archive from GitHub and records the source digest of its files as the Release's `sourceSha256`. An archive holding a link is refused, since Frontier installs none. When the archive cannot be downloaded, the check cannot finish and nothing is listed; it runs again when the pull request is reopened.
 
 **Flags.** The scan reads the built Bundles, which hold the Application's code and every package it uses. It records what it sees on the Release as flags, each a short word from a fixed list that Frontier words for the install prompt. A flag does not refuse a listing. The install prompt shows each flag, so a person decides with them in view. The flags are:
 

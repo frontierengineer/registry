@@ -115,8 +115,8 @@ test('dry run of the workflow: the change is read as data, checked, and lands on
   assert.deepEqual(git(['diff', '--name-only', 'HEAD^1', 'HEAD'], published).split('\n').sort(), ['applications/github.com/acme/notes.json', `checks/${release}.json`, 'index.json', 'listings/github.com/acme/notes.json'].sort());
   assert.equal(read(published, 'index.json').applications[0].latest.hash, release);
   assert.equal(read(published, `applications/${NOTES}.json`).repositoryId, 4242);
-  assert.equal(read(published, `applications/${NOTES}.json`).releases[0].archiveSha256, verdict.archiveSha256, 'the landed Release pins its source archive');
-  assert.match(verdict.archiveSha256, /^[0-9a-f]{64}$/);
+  assert.equal(read(published, `applications/${NOTES}.json`).releases[0].sourceSha256, verdict.sourceSha256, 'the landed Release pins its source by its files');
+  assert.match(verdict.sourceSha256, /^[0-9a-f]{64}$/);
   assert.equal(readFileSync(join(published, 'checks', 'unrelated.txt'), 'utf8'), 'x');
 
   const said = node('say.mjs', ['--verdict', join(scratch, 'verdict.json'), '--commit', tip], published);

@@ -6,7 +6,7 @@
   "releases": [
     {
       "hash": "67096166bdb2d7b0a7725aa8ee6da9428cac3dc9",
-      "archiveSha256": "3d20247ec2d7ba61ea1f252450e80d6a2365ed1ecacfe66b65b4f86759d944fb",
+      "sourceSha256": "60abc7f148f2dde023d6ca4e26c5d30610de91987fdb7368a0a5944a72f02dd9",
       "listedAt": "2026-11-20T13:01:45.000Z",
       "flags": [
         "processes",
@@ -145,7 +145,7 @@
     },
     {
       "hash": "4e90ad3607a4047b54bed23bfa230d25243660b6",
-      "archiveSha256": "d652d9c1abe1baf015f708553209eda5c9c0129130e7687c5a18c17a30977f10",
+      "sourceSha256": "af5e7d7fbaa758b53ba67677c81b66bcf18068cfcce19eabc27a5a9e660eb5bd",
       "listedAt": "2026-11-21T17:51:40.000Z",
       "flags": [
         "processes",

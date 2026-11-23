@@ -13,9 +13,10 @@
 //   checks/<commit hash>.json  { repository, commitHash, outcome: listed|rejected|pending, reason, checkedAt }
 //   platform.json              { builds: [{ buildId, publishedAt }] }
 //
-//   Release = { hash, archiveSha256, listedAt, flags: string[], platformBuild, contributions }
-//             archiveSha256 is the SHA-256 of the gzipped tar GitHub serves for the commit at
-//             https://codeload.github.com/<owner>/<name>/tar.gz/<hash>, which the Host verifies
+//   Release = { hash, sourceSha256, listedAt, flags: string[], platformBuild, contributions }
+//             sourceSha256 is the source digest of the files of the gzipped tar GitHub serves for
+//             the commit at https://codeload.github.com/<owner>/<name>/tar.gz/<hash> (lib/source.mjs),
+//             which the Host verifies
 //
 // and the listings publishers add by pull request, which the Host never reads:
 //

@@ -6,7 +6,7 @@
   "releases": [
     {
       "hash": "38b80e05c8c31f8928437e9b30a10ca62a707f88",
-      "archiveSha256": "8f0431285d3426f4aa1b2222e66f5658aa3fe10c721137da499ddbd94839d797",
+      "sourceSha256": "97c4c925f76d9731b9e06e94aab460902152f8dceeb5f4ddd95a1eea043f0bef",
       "listedAt": "2026-11-20T12:59:43.000Z",
       "flags": [
         "processes",

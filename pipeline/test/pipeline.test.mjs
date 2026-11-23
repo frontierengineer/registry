@@ -1,10 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { gunzipSync, gzipSync } from 'node:zlib';
+import { dirname, join } from 'node:path';
 import { breakingChanges } from '../lib/breaking.mjs';
-import { archiveSha256Of, backfillArchives } from '../lib/archive.mjs';
+import { backfillSources, filesOfArchive, sourceDigestOf, sourceSha256Of } from '../lib/source.mjs';
 import { checkListing } from '../lib/check.mjs';
 import { listingChangeOf } from '../lib/listing.mjs';
 import { identityOfRepository } from '../lib/identity.mjs';
@@ -101,13 +104,13 @@ test('dry run: a listing pull request is checked, listed, replaced, refused and 
   assert.deepEqual(listed.flags, ['network']);
   assert.equal(listed.cloneUrl, 'https://github.com/acme/notes');
   const served = await repos.archiveFor(`https://codeload.github.com/acme/notes/tar.gz/${first}`);
-  assert.equal(listed.archiveSha256, createHash('sha256').update(served.bytes).digest('hex'), 'the verdict pins the archive GitHub serves for the commit');
+  assert.equal(listed.sourceSha256, sourceDigestOf(filesOfArchive(served.bytes).files), 'the verdict pins the files of the archive GitHub serves for the commit');
   assert.deepEqual(recordVerdict(root, listed, '2026-11-19T10:00:00.000Z'), [`applications/${NOTES}.json`, `checks/${first}.json`, 'index.json']);
   const file = read(root, `applications/${NOTES}.json`);
   assert.deepEqual(Object.keys(file), ['id', 'repository', 'repositoryId', 'unpublished', 'releases']);
   assert.equal(file.repositoryId, 1000);
-  assert.deepEqual(file.releases.map(({ hash, archiveSha256, listedAt, flags, platformBuild }) => ({ hash, archiveSha256, listedAt, flags, platformBuild })), [{ hash: first, archiveSha256: listed.archiveSha256, listedAt: '2026-11-19T10:00:00.000Z', flags: ['network'], platformBuild: '' }]);
-  assert.deepEqual(Object.keys(file.releases[0]), ['hash', 'archiveSha256', 'listedAt', 'flags', 'platformBuild', 'contributions']);
+  assert.deepEqual(file.releases.map(({ hash, sourceSha256, listedAt, flags, platformBuild }) => ({ hash, sourceSha256, listedAt, flags, platformBuild })), [{ hash: first, sourceSha256: listed.sourceSha256, listedAt: '2026-11-19T10:00:00.000Z', flags: ['network'], platformBuild: '' }]);
+  assert.deepEqual(Object.keys(file.releases[0]), ['hash', 'sourceSha256', 'listedAt', 'flags', 'platformBuild', 'contributions']);
   assert.equal(file.releases[0].contributions.title, 'Notes');
   assert.deepEqual(read(root, `checks/${first}.json`), { repository: 'git@github.com:acme/notes.git', commitHash: first, outcome: 'listed', reason: '', checkedAt: '2026-11-19T10:00:00.000Z' });
   assert.equal(read(root, 'index.json').report, REPORT, 'rebuilding the index keeps where an Application is reported');
@@ -172,52 +175,107 @@ test('dry run: a listing pull request is checked, listed, replaced, refused and 
   assert.equal(existsSync(join(root, 'listings')), true);
 });
 
-test('a source archive is pinned only when it is served, the same twice', async () => {
+const SOURCE_DIGEST_VECTOR = {
+  files: [
+    { path: 'contributions.json', executable: false, text: '{ "id": "github.com/acme/vector", "title": "Vector", "color": "#000000" }\n' },
+    { path: 'bin/run.sh', executable: true, text: '#!/bin/sh\necho hi\n' },
+    { path: 'src/a b.ts', executable: false, text: '' },
+    { path: 'src/ünïcode.ts', executable: false, text: 'export const word = "über";\n' },
+    { path: 'Z.md', executable: false, text: '# Z\n' },
+    { path: 'src/lib/deep.ts', executable: false, text: 'export {};\n' },
+  ],
+  sourceSha256: 'e93a7326ac66c721a17d3e80f965296d7fd7650940433092205286afe73f1431',
+};
+
+const tarred = (build) => {
+  const place = mkdtempSync(join(tmpdir(), 'registry-source-'));
+  try {
+    build(join(place, 'vector-abc'));
+    const ran = spawnSync('tar', ['-czf', '-', '-C', place, 'vector-abc']);
+    assert.equal(ran.status, 0, String(ran.stderr));
+    return new Uint8Array(ran.stdout);
+  } finally {
+    rmSync(place, { recursive: true, force: true });
+  }
+};
+const vectorTree = (root) => {
+  for (const { path, executable, text } of SOURCE_DIGEST_VECTOR.files) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), text);
+    chmodSync(join(root, path), executable ? 0o755 : 0o644);
+  }
+};
+
+test('the source digest of the shared test vector is the one Frontier\'s Host and build compute, from the files and from an archive of them however it is compressed', () => {
+  const files = SOURCE_DIGEST_VECTOR.files.map(({ path, executable, text }) => ({ path, executable, bytes: Buffer.from(text, 'utf8') }));
+  assert.equal(sourceDigestOf(files), SOURCE_DIGEST_VECTOR.sourceSha256);
+  assert.equal(sourceDigestOf([...files].reverse()), SOURCE_DIGEST_VECTOR.sourceSha256);
+  const archive = tarred(vectorTree);
+  const again = gzipSync(gunzipSync(archive), { level: 1 });
+  assert.notDeepEqual(createHash('sha256').update(again).digest('hex'), createHash('sha256').update(archive).digest('hex'));
+  assert.equal(sourceDigestOf(filesOfArchive(archive).files), SOURCE_DIGEST_VECTOR.sourceSha256);
+  assert.equal(sourceDigestOf(filesOfArchive(again).files), SOURCE_DIGEST_VECTOR.sourceSha256, 'compressed otherwise, the same files have the same digest');
+  const changed = tarred((root) => { vectorTree(root); writeFileSync(join(root, 'Z.md'), '# Y\n'); });
+  assert.notEqual(sourceDigestOf(filesOfArchive(changed).files), SOURCE_DIGEST_VECTOR.sourceSha256);
+  const plain = tarred((root) => { vectorTree(root); chmodSync(join(root, 'bin/run.sh'), 0o644); });
+  assert.notEqual(sourceDigestOf(filesOfArchive(plain).files), SOURCE_DIGEST_VECTOR.sourceSha256, 'a file no longer executable is another source');
+  const linked = tarred((root) => { vectorTree(root); symlinkSync('/etc/passwd', join(root, 'secret')); });
+  assert.match(filesOfArchive(linked).problem, /secret is a link, and Frontier installs no link/);
+  assert.match(filesOfArchive(new TextEncoder().encode('not gzip')).problem, /^it is not gzipped/);
+});
+
+test('a source digest is recorded only from an archive that is served and that Frontier installs, and says why not', async () => {
   const commit = 'c'.repeat(40);
   const asked = [];
   const serving = (...answers) => async (url) => { asked.push(url); return answers.shift(); };
-  const bytes = (text) => ({ kind: 'downloaded', bytes: new TextEncoder().encode(text) });
-  const sha = createHash('sha256').update('archive').digest('hex');
-  assert.deepEqual(await archiveSha256Of(NOTES, commit, serving(bytes('archive'), bytes('archive'))), { sha256: sha });
-  assert.deepEqual(asked, [`https://codeload.github.com/acme/notes/tar.gz/${commit}`, `https://codeload.github.com/acme/notes/tar.gz/${commit}`]);
-  assert.match((await archiveSha256Of(NOTES, commit, serving(bytes('archive'), bytes('other')))).problem, /two different source archives/);
-  assert.match((await archiveSha256Of(NOTES, commit, serving({ kind: 'failed', reason: 'it answered 404' }))).problem, /cannot be downloaded: it answered 404/);
-  assert.match((await archiveSha256Of(NOTES, commit, serving(bytes(''), bytes('')))).problem, /is empty/);
-  assert.match((await archiveSha256Of('gitlab.com/acme/notes', commit, serving())).problem, /not a GitHub repository/);
+  const archive = tarred(vectorTree);
+  assert.deepEqual(await sourceSha256Of(NOTES, commit, serving({ kind: 'downloaded', bytes: archive })), { sha256: SOURCE_DIGEST_VECTOR.sourceSha256 });
+  assert.deepEqual(asked, [`https://codeload.github.com/acme/notes/tar.gz/${commit}`]);
+  const failed = await sourceSha256Of(NOTES, commit, serving({ kind: 'failed', reason: 'it answered 404' }));
+  assert.match(failed.problem, /cannot be downloaded: it answered 404/);
+  assert.equal(failed.refused, false);
+  const linked = await sourceSha256Of(NOTES, commit, serving({ kind: 'downloaded', bytes: tarred((root) => { vectorTree(root); symlinkSync('/etc/passwd', join(root, 'secret')); }) }));
+  assert.match(linked.problem, /installs no link/);
+  assert.equal(linked.refused, true);
+  assert.match((await sourceSha256Of('gitlab.com/acme/notes', commit, serving())).problem, /not a GitHub repository/);
 });
 
-test('a listing whose archive cannot be pinned is not listed, and says why', async () => {
+test('a listing whose archive cannot be downloaded is not listed and is tried again; one holding a link is refused', async () => {
   const root = emptyRegistry();
   const repos = repositories();
   const github = fakeGitHub({ repositories: { 'acme/notes': { owner: 'acme' } } });
   const commit = repos.commit('acme', 'notes', notesFiles());
-  const verdict = await checkListing({ root, changes: added(NOTES), listingText: listingText(NOTES, 'https://github.com/acme/notes', commit), author: 'acme', github, cloneUrlFor: repos.cloneUrlFor, archiveFor: async () => ({ kind: 'failed', reason: 'codeload answered 503' }) });
-  assert.equal(verdict.outcome, 'unavailable');
-  assert.match(verdict.reason, /codeload answered 503/);
-  assert.throws(() => recordVerdict(root, { outcome: 'listed', id: NOTES, repository: 'https://github.com/acme/notes', cloneUrl: 'https://github.com/acme/notes', repositoryId: 1, commit, flags: [], contributions: {} }, '2026-11-19T10:00:00.000Z'), /no source archive SHA-256/);
+  const check = (archiveFor) => checkListing({ root, changes: added(NOTES), listingText: listingText(NOTES, 'https://github.com/acme/notes', commit), author: 'acme', github, cloneUrlFor: repos.cloneUrlFor, archiveFor });
+  const unavailable = await check(async () => ({ kind: 'failed', reason: 'codeload answered 503' }));
+  assert.equal(unavailable.outcome, 'unavailable');
+  assert.match(unavailable.reason, /codeload answered 503/);
+  const linked = await check(async () => ({ kind: 'downloaded', bytes: tarred((at) => { vectorTree(at); symlinkSync('/etc/passwd', join(at, 'secret')); }) }));
+  assert.equal(linked.outcome, 'rejected');
+  assert.match(linked.reason, /installs no link/);
+  assert.throws(() => recordVerdict(root, { outcome: 'listed', id: NOTES, repository: 'https://github.com/acme/notes', cloneUrl: 'https://github.com/acme/notes', repositoryId: 1, commit, flags: [], contributions: {} }, '2026-11-19T10:00:00.000Z'), /no source digest/);
 });
 
-test('backfilling records the archive of every Release that lacks one, and nothing twice', async () => {
+test('backfilling records the source digest of every Release that lacks one, drops a pin of the archive\'s bytes, and records nothing twice', async () => {
   const root = emptyRegistry();
   const at = '2026-11-19T10:00:00.000Z';
   const one = 'a'.repeat(40);
   const two = 'b'.repeat(40);
-  const older = { hash: one, listedAt: at, flags: [], platformBuild: '', contributions: { id: NOTES } };
+  const older = { hash: one, archiveSha256: 'd'.repeat(64), listedAt: at, flags: [], platformBuild: '', contributions: { id: NOTES } };
   const pinned = 'f'.repeat(64);
   const path = `applications/${NOTES}.json`;
   mkdirSync(join(root, 'applications', 'github.com', 'acme'), { recursive: true });
-  writeFileSync(join(root, path), `${JSON.stringify({ id: NOTES, repository: 'https://github.com/acme/notes', repositoryId: 1, unpublished: false, releases: [older, { ...older, hash: two, archiveSha256: pinned }] }, null, 2)}\n`);
+  writeFileSync(join(root, path), `${JSON.stringify({ id: NOTES, repository: 'https://github.com/acme/notes', repositoryId: 1, unpublished: false, releases: [older, { ...older, hash: two, sourceSha256: pinned }] }, null, 2)}\n`);
   const asked = [];
-  const archiveFor = async (url) => { asked.push(url); return { kind: 'downloaded', bytes: new TextEncoder().encode(url) }; };
-  const done = await backfillArchives(root, archiveFor);
-  const expected = createHash('sha256').update(`https://codeload.github.com/acme/notes/tar.gz/${one}`).digest('hex');
-  assert.deepEqual(done, { recorded: [{ id: NOTES, hash: one, archiveSha256: expected }], problems: [], written: [path] });
-  assert.deepEqual(asked, [`https://codeload.github.com/acme/notes/tar.gz/${one}`, `https://codeload.github.com/acme/notes/tar.gz/${one}`], 'a Release pinned already is not downloaded');
+  const archive = tarred(vectorTree);
+  const archiveFor = async (url) => { asked.push(url); return { kind: 'downloaded', bytes: archive }; };
+  const done = await backfillSources(root, archiveFor);
+  assert.deepEqual(done, { recorded: [{ id: NOTES, hash: one, sourceSha256: SOURCE_DIGEST_VECTOR.sourceSha256 }], problems: [], written: [path] });
+  assert.deepEqual(asked, [`https://codeload.github.com/acme/notes/tar.gz/${one}`], 'a Release with a digest already is not downloaded');
   const file = read(root, path);
-  assert.deepEqual(file.releases.map((release) => [release.hash, release.archiveSha256]), [[one, expected], [two, pinned]]);
-  assert.deepEqual(Object.keys(file.releases[0]), ['hash', 'archiveSha256', 'listedAt', 'flags', 'platformBuild', 'contributions']);
-  assert.deepEqual(await backfillArchives(root, archiveFor), { recorded: [], problems: [], written: [] });
-  const failing = await backfillArchives(root, async () => ({ kind: 'failed', reason: 'nope' }));
+  assert.deepEqual(file.releases.map((release) => [release.hash, release.sourceSha256]), [[one, SOURCE_DIGEST_VECTOR.sourceSha256], [two, pinned]]);
+  assert.deepEqual(Object.keys(file.releases[0]), ['hash', 'sourceSha256', 'listedAt', 'flags', 'platformBuild', 'contributions']);
+  assert.deepEqual(await backfillSources(root, archiveFor), { recorded: [], problems: [], written: [] });
+  const failing = await backfillSources(root, async () => ({ kind: 'failed', reason: 'nope' }));
   assert.deepEqual(failing.problems, []);
 });
 
@@ -225,7 +283,7 @@ test('the index holds only what Browse shows, however much a Release contributes
   const root = emptyRegistry();
   const at = '2026-11-19T10:00:00.000Z';
   const panels = Array.from({ length: 200 }, (_, n) => ({ id: `panel-${n}`, title: `Panel ${n}`, description: 'A panel that takes room in the Application file and none in the index.' }));
-  const listed = (id, commit, contributions, flags = []) => ({ outcome: 'listed', id, repository: `https://${id}`, cloneUrl: `https://${id}`, repositoryId: id.length, commit, archiveSha256: 'e'.repeat(64), flags, contributions });
+  const listed = (id, commit, contributions, flags = []) => ({ outcome: 'listed', id, repository: `https://${id}`, cloneUrl: `https://${id}`, repositoryId: id.length, commit, sourceSha256: 'e'.repeat(64), flags, contributions });
   recordVerdict(root, listed(NOTES, 'a'.repeat(40), { id: NOTES, title: 'Notes', description: 'Markdown notes.', color: '#3b82f6', surface: { panels } }, ['network']), at);
   recordVerdict(root, listed('github.com/acme/bare', 'b'.repeat(40), { id: 'github.com/acme/bare' }), at);
   const index = read(root, 'index.json');

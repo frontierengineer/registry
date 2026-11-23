@@ -4,7 +4,7 @@
 // repository is untrusted code that is cloned, scanned and built, never run.
 //
 // The verdict is one of:
-//   { outcome: 'listed', id, repository, cloneUrl, repositoryId, commit, archiveSha256, flags, contributions }
+//   { outcome: 'listed', id, repository, cloneUrl, repositoryId, commit, sourceSha256, flags, contributions }
 //   { outcome: 'unpublished', id }
 //   { outcome: 'rejected', id, repository, commit, reason }   (id, repository and commit '' when the listing never named them)
 
@@ -12,7 +12,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { archiveSha256Of, liveArchive } from './archive.mjs';
+import { liveArchive, sourceSha256Of } from './source.mjs';
 import { breakingChanges } from './breaking.mjs';
 import { buildApplication } from './build.mjs';
 import { CONTRIBUTIONS_FILE, contributionsOf } from './contributions.mjs';
@@ -74,7 +74,7 @@ function treeOf(source, commit) {
  *   author       the login that opened the pull request
  *   github       the GitHub answers (lib/github.mjs)
  *   cloneUrlFor  the URL to clone an id's repository from; the anonymous HTTPS URL on GitHub
- *   archiveFor   downloads a source archive by its URL (lib/archive.mjs); GitHub's codeload
+ *   archiveFor   downloads a source archive by its URL (lib/source.mjs); GitHub's codeload
  */
 export async function checkListing({ root, changes, listingText, author, github, cloneUrlFor = (parts) => cloneUrlOf(parts), archiveFor = liveArchive }) {
   const change = listingChangeOf(changes);
@@ -156,10 +156,10 @@ export async function checkListing({ root, changes, listingText, author, github,
     const built = await buildApplication(source);
     if (built.problem !== undefined) return rejected(built.problem, listing);
 
-    const archive = await archiveSha256Of(listing.id, listing.commit, archiveFor);
-    if (archive.problem !== undefined) return { outcome: 'unavailable', reason: archive.problem };
+    const archive = await sourceSha256Of(listing.id, listing.commit, archiveFor);
+    if (archive.problem !== undefined) return archive.refused ? rejected(archive.problem, listing) : { outcome: 'unavailable', reason: archive.problem };
 
-    return { outcome: 'listed', id: listing.id, repository: listing.repository, cloneUrl: cloneUrlOf(parts), repositoryId: owned.repositoryId, commit: listing.commit, archiveSha256: archive.sha256, flags: flagsOf(built.bundles), contributions };
+    return { outcome: 'listed', id: listing.id, repository: listing.repository, cloneUrl: cloneUrlOf(parts), repositoryId: owned.repositoryId, commit: listing.commit, sourceSha256: archive.sha256, flags: flagsOf(built.bundles), contributions };
   } finally {
     rmSync(place.directory, { recursive: true, force: true });
   }
