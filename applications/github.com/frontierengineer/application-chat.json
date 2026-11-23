@@ -6,6 +6,7 @@
   "releases": [
     {
       "hash": "0e297ebd44334f105e4ac5aa2bc617592bc1f7a3",
+      "archiveSha256": "b8b5cb5ece9656b165ef6138160a84a2a003b86d2326cf02bcd633e648e125c6",
       "listedAt": "2026-11-20T12:57:34.000Z",
       "flags": [],
       "platformBuild": "",
@@ -272,6 +273,7 @@
     },
     {
       "hash": "acb1f707f769cfd91bc5d280d7a9e0bfc7da9270",
+      "archiveSha256": "dbe472aa612597a6aded2ba80d2210eda1dc579c2bbf64339e28adff3dea6e2a",
       "listedAt": "2026-11-20T22:58:16.000Z",
       "flags": [],
       "platformBuild": "89cde725f3a3065b1ef8271cab3e50a47c45fb25",

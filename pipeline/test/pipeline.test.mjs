@@ -1,8 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { breakingChanges } from '../lib/breaking.mjs';
+import { archiveSha256Of, backfillArchives } from '../lib/archive.mjs';
 import { checkListing } from '../lib/check.mjs';
 import { listingChangeOf } from '../lib/listing.mjs';
 import { identityOfRepository } from '../lib/identity.mjs';
@@ -91,18 +93,21 @@ test('dry run: a listing pull request is checked, listed, replaced, refused and 
     members: { acme: ['ada'] },
   };
   const github = fakeGitHub(known);
-  const check = (changes, text, author = 'ada') => checkListing({ root, changes, listingText: text, author, github, cloneUrlFor: repos.cloneUrlFor });
+  const check = (changes, text, author = 'ada') => checkListing({ root, changes, listingText: text, author, github, cloneUrlFor: repos.cloneUrlFor, archiveFor: repos.archiveFor });
 
   const first = repos.commit('acme', 'notes', notesFiles());
   const listed = await check(added(NOTES), listingText(NOTES, 'git@github.com:acme/notes.git', first));
   assert.equal(listed.outcome, 'listed', listed.reason);
   assert.deepEqual(listed.flags, ['network']);
   assert.equal(listed.cloneUrl, 'https://github.com/acme/notes');
+  const served = await repos.archiveFor(`https://codeload.github.com/acme/notes/tar.gz/${first}`);
+  assert.equal(listed.archiveSha256, createHash('sha256').update(served.bytes).digest('hex'), 'the verdict pins the archive GitHub serves for the commit');
   assert.deepEqual(recordVerdict(root, listed, '2026-11-19T10:00:00.000Z'), [`applications/${NOTES}.json`, `checks/${first}.json`, 'index.json']);
   const file = read(root, `applications/${NOTES}.json`);
   assert.deepEqual(Object.keys(file), ['id', 'repository', 'repositoryId', 'unpublished', 'releases']);
   assert.equal(file.repositoryId, 1000);
-  assert.deepEqual(file.releases.map(({ hash, listedAt, flags, platformBuild }) => ({ hash, listedAt, flags, platformBuild })), [{ hash: first, listedAt: '2026-11-19T10:00:00.000Z', flags: ['network'], platformBuild: '' }]);
+  assert.deepEqual(file.releases.map(({ hash, archiveSha256, listedAt, flags, platformBuild }) => ({ hash, archiveSha256, listedAt, flags, platformBuild })), [{ hash: first, archiveSha256: listed.archiveSha256, listedAt: '2026-11-19T10:00:00.000Z', flags: ['network'], platformBuild: '' }]);
+  assert.deepEqual(Object.keys(file.releases[0]), ['hash', 'archiveSha256', 'listedAt', 'flags', 'platformBuild', 'contributions']);
   assert.equal(file.releases[0].contributions.title, 'Notes');
   assert.deepEqual(read(root, `checks/${first}.json`), { repository: 'git@github.com:acme/notes.git', commitHash: first, outcome: 'listed', reason: '', checkedAt: '2026-11-19T10:00:00.000Z' });
   assert.equal(read(root, 'index.json').report, REPORT, 'rebuilding the index keeps where an Application is reported');
@@ -167,11 +172,60 @@ test('dry run: a listing pull request is checked, listed, replaced, refused and 
   assert.equal(existsSync(join(root, 'listings')), true);
 });
 
+test('a source archive is pinned only when it is served, the same twice', async () => {
+  const commit = 'c'.repeat(40);
+  const asked = [];
+  const serving = (...answers) => async (url) => { asked.push(url); return answers.shift(); };
+  const bytes = (text) => ({ kind: 'downloaded', bytes: new TextEncoder().encode(text) });
+  const sha = createHash('sha256').update('archive').digest('hex');
+  assert.deepEqual(await archiveSha256Of(NOTES, commit, serving(bytes('archive'), bytes('archive'))), { sha256: sha });
+  assert.deepEqual(asked, [`https://codeload.github.com/acme/notes/tar.gz/${commit}`, `https://codeload.github.com/acme/notes/tar.gz/${commit}`]);
+  assert.match((await archiveSha256Of(NOTES, commit, serving(bytes('archive'), bytes('other')))).problem, /two different source archives/);
+  assert.match((await archiveSha256Of(NOTES, commit, serving({ kind: 'failed', reason: 'it answered 404' }))).problem, /cannot be downloaded: it answered 404/);
+  assert.match((await archiveSha256Of(NOTES, commit, serving(bytes(''), bytes('')))).problem, /is empty/);
+  assert.match((await archiveSha256Of('gitlab.com/acme/notes', commit, serving())).problem, /not a GitHub repository/);
+});
+
+test('a listing whose archive cannot be pinned is not listed, and says why', async () => {
+  const root = emptyRegistry();
+  const repos = repositories();
+  const github = fakeGitHub({ repositories: { 'acme/notes': { owner: 'acme' } } });
+  const commit = repos.commit('acme', 'notes', notesFiles());
+  const verdict = await checkListing({ root, changes: added(NOTES), listingText: listingText(NOTES, 'https://github.com/acme/notes', commit), author: 'acme', github, cloneUrlFor: repos.cloneUrlFor, archiveFor: async () => ({ kind: 'failed', reason: 'codeload answered 503' }) });
+  assert.equal(verdict.outcome, 'unavailable');
+  assert.match(verdict.reason, /codeload answered 503/);
+  assert.throws(() => recordVerdict(root, { outcome: 'listed', id: NOTES, repository: 'https://github.com/acme/notes', cloneUrl: 'https://github.com/acme/notes', repositoryId: 1, commit, flags: [], contributions: {} }, '2026-11-19T10:00:00.000Z'), /no source archive SHA-256/);
+});
+
+test('backfilling records the archive of every Release that lacks one, and nothing twice', async () => {
+  const root = emptyRegistry();
+  const at = '2026-11-19T10:00:00.000Z';
+  const one = 'a'.repeat(40);
+  const two = 'b'.repeat(40);
+  const older = { hash: one, listedAt: at, flags: [], platformBuild: '', contributions: { id: NOTES } };
+  const pinned = 'f'.repeat(64);
+  const path = `applications/${NOTES}.json`;
+  mkdirSync(join(root, 'applications', 'github.com', 'acme'), { recursive: true });
+  writeFileSync(join(root, path), `${JSON.stringify({ id: NOTES, repository: 'https://github.com/acme/notes', repositoryId: 1, unpublished: false, releases: [older, { ...older, hash: two, archiveSha256: pinned }] }, null, 2)}\n`);
+  const asked = [];
+  const archiveFor = async (url) => { asked.push(url); return { kind: 'downloaded', bytes: new TextEncoder().encode(url) }; };
+  const done = await backfillArchives(root, archiveFor);
+  const expected = createHash('sha256').update(`https://codeload.github.com/acme/notes/tar.gz/${one}`).digest('hex');
+  assert.deepEqual(done, { recorded: [{ id: NOTES, hash: one, archiveSha256: expected }], problems: [], written: [path] });
+  assert.deepEqual(asked, [`https://codeload.github.com/acme/notes/tar.gz/${one}`, `https://codeload.github.com/acme/notes/tar.gz/${one}`], 'a Release pinned already is not downloaded');
+  const file = read(root, path);
+  assert.deepEqual(file.releases.map((release) => [release.hash, release.archiveSha256]), [[one, expected], [two, pinned]]);
+  assert.deepEqual(Object.keys(file.releases[0]), ['hash', 'archiveSha256', 'listedAt', 'flags', 'platformBuild', 'contributions']);
+  assert.deepEqual(await backfillArchives(root, archiveFor), { recorded: [], problems: [], written: [] });
+  const failing = await backfillArchives(root, async () => ({ kind: 'failed', reason: 'nope' }));
+  assert.deepEqual(failing.problems, []);
+});
+
 test('the index holds only what Browse shows, however much a Release contributes, and keeps the fields a maintainer wrote', () => {
   const root = emptyRegistry();
   const at = '2026-11-19T10:00:00.000Z';
   const panels = Array.from({ length: 200 }, (_, n) => ({ id: `panel-${n}`, title: `Panel ${n}`, description: 'A panel that takes room in the Application file and none in the index.' }));
-  const listed = (id, commit, contributions, flags = []) => ({ outcome: 'listed', id, repository: `https://${id}`, cloneUrl: `https://${id}`, repositoryId: id.length, commit, flags, contributions });
+  const listed = (id, commit, contributions, flags = []) => ({ outcome: 'listed', id, repository: `https://${id}`, cloneUrl: `https://${id}`, repositoryId: id.length, commit, archiveSha256: 'e'.repeat(64), flags, contributions });
   recordVerdict(root, listed(NOTES, 'a'.repeat(40), { id: NOTES, title: 'Notes', description: 'Markdown notes.', color: '#3b82f6', surface: { panels } }, ['network']), at);
   recordVerdict(root, listed('github.com/acme/bare', 'b'.repeat(40), { id: 'github.com/acme/bare' }), at);
   const index = read(root, 'index.json');
